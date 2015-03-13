@@ -40,7 +40,7 @@ This should be big enough to hold itoa(MAX_LINES_SUPPORTED) + " : "
 #define SP_LISTLABEL_WIDTH 260
 #define SP_RESLABEL_WIDTH 200
 
-#define SP_ROW_HEIGHT (25)
+#define SP_ROW_HEIGHT (22)
 #define SP_LBL_HEIGHT (15)
 
 #define SP_LIST_HEIGHT (100)
@@ -52,7 +52,7 @@ This should be big enough to hold itoa(MAX_LINES_SUPPORTED) + " : "
 
 #define SP_INPUT_Y (SP_Y_OFFSET + SP_LBL_HEIGHT)
 
-#define SP_BTN_Y (SP_ROW_HEIGHT + (2 * SP_Y_OFFSET) + SP_INPUT_Y)
+#define SP_BTN_Y (SP_ROW_HEIGHT + (SP_Y_OFFSET) + SP_INPUT_Y)
 #define SP_BTN_WIDTH (70)
 #define SP_ADD_BTN_WIDTH (100)
 
@@ -284,6 +284,8 @@ class SearchPlusUI{
 	HWND clipboard_tooltip;
 	HWND highlight_tooltip;
 	HWND add_tooltip;
+
+	HFONT font;
 
 	int linecount;
 	int linecount_strlen;
@@ -549,6 +551,25 @@ void SearchPlusUI::create_controls(HWND parent)
 	clipboard_tooltip = assign_tooltip(copy_button, parent, TEXT("Copy results to clipboard"));
 	highlight_tooltip = assign_tooltip(highlight_button, parent, TEXT("Highlight results in Notepad++"));
 	add_tooltip = assign_tooltip(add_button, parent, TEXT("Add keywords to search for"));
+
+	font = CreateFont(14, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS,
+		TEXT("Verdana"));
+	
+	if(font){
+		SendMessage(add_button, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(search_button, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(reset_button, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(highlight_button, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(copy_button, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(remove_button, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(input_field, WM_SETFONT, WPARAM(font), 0);
+
+		SendMessage(pattern_listbox, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(list_label, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(result_label, WM_SETFONT, WPARAM(font), 0);
+		SendMessage(output_area, WM_SETFONT, WPARAM(font), 0);
+	}
 }
 
 void SearchPlusUI::close_window()
@@ -559,6 +580,7 @@ void SearchPlusUI::close_window()
 	SetWindowLongPtr(add_button, GWLP_WNDPROC, (LONG_PTR)add_proc);
 
 	CloseWindow(main_window);
+	DeleteObject(font);
 	close_flag = true;
 }
 
@@ -587,9 +609,13 @@ void SearchPlusUI::handle_window_close()
 {
 	init_flag = false;
 	DestroyWindow(main_window);
+
+	if(font)
+		DeleteObject(font);
+
 	Ed_SetFocusOnEditor();
 }
-#define pattern_listbox_WIDTH (350)
+#define pattern_listbox_WIDTH (300)
 void SearchPlusUI::resize_controls()
 {
 	RECT parent_rect;
@@ -615,11 +641,11 @@ void SearchPlusUI::resize_controls()
 	MoveWindow(add_button, width / 2 - 2 * (SP_PADDING_HORI + SP_BTN_WIDTH),
 		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
 
-	MoveWindow(remove_button, width / 2 - 2 * (SP_PADDING_HORI + SP_BTN_WIDTH),
-		SP_BTN_Y + SP_ROW_HEIGHT, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(remove_button, width / 2 - 3 * (SP_PADDING_HORI + SP_BTN_WIDTH),
+		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
 
-	MoveWindow(reset_button, width / 2 - SP_PADDING_HORI - SP_BTN_WIDTH,
-		SP_BTN_Y + SP_ROW_HEIGHT, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(reset_button, width / 2 - 4 * (SP_PADDING_HORI + SP_BTN_WIDTH),
+		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
 
 	MoveWindow(pattern_listbox, width / 2 + SP_PADDING_HORI, 
 		SP_Y_OFFSET, pattern_listbox_WIDTH,
@@ -631,12 +657,11 @@ void SearchPlusUI::resize_controls()
 	MoveWindow(result_label, SP_MARGIN_HORIZONTAL, SP_TA_Y - SP_LBL_HEIGHT, 
 		SP_RESLABEL_WIDTH, SP_LBL_HEIGHT, true);
 
+	MoveWindow(copy_button, width / 2 - SP_PADDING_HORI - SP_COPY_BTN_WIDTH,
+		SP_BTN_Y + SP_Y_OFFSET + SP_ROW_HEIGHT, SP_COPY_BTN_WIDTH, SP_ROW_HEIGHT, true);
 
-	MoveWindow(copy_button, COPY_BTN_X(width),
-		SP_Y_OFFSET, SP_COPY_BTN_WIDTH, SP_ROW_HEIGHT, true);
-
-	MoveWindow(highlight_button, COPY_BTN_X(width),
-		2 * SP_Y_OFFSET + SP_ROW_HEIGHT, 
+	MoveWindow(highlight_button, width / 2 - 2 * SP_PADDING_HORI - SP_COPY_BTN_WIDTH - HIGHLIGHT_BTN_WIDTH,
+		SP_BTN_Y + SP_Y_OFFSET + SP_ROW_HEIGHT, 
 		HIGHLIGHT_BTN_WIDTH, SP_ROW_HEIGHT, true);
 
 	InvalidateRect(main_window, NULL, true);
@@ -847,7 +872,7 @@ void SearchPlusUI::draw_pattern(LPDRAWITEMSTRUCT pDis)
 
 	SetBkMode(pDis->hDC, TRANSPARENT);
 
-	if(pDis->itemAction == ODA_SELECT){
+	if(pDis->itemAction == ODA_SELECT || (pDis->itemState | ODS_SELECTED)){
 
 		HBRUSH brush = CreateSolidBrush((pDis->itemState & ODS_SELECTED) ? COLOR_SEL_BKG : COLOR_WHITE);
 		FillRect(pDis->hDC, &pDis->rcItem, brush);
@@ -885,13 +910,13 @@ void SearchPlusUI::draw_matched_string(LPDRAWITEMSTRUCT pDis)
 	int i = 0, j = 0;
 	matched_segment_t *matchlist = NULL;
 
-	if(!lbitem || (pDis->itemAction == ODA_FOCUS)){
+	if(!lbitem){
 		return;
 	}
 
 	SetBkMode(pDis->hDC, TRANSPARENT);
 
-	if(pDis->itemAction == ODA_SELECT){
+	if((pDis->itemAction == ODA_SELECT) || (pDis->itemState | ODS_SELECTED)){
 
 		HBRUSH brush = CreateSolidBrush((pDis->itemState & ODS_SELECTED) ? COLOR_SEL_BKG : COLOR_WHITE);
 		FillRect(pDis->hDC, &pDis->rcItem, brush);
