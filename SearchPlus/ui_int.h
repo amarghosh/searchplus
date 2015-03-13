@@ -35,6 +35,8 @@ The UI interfaces are defined in searchplus.h
 #define BTN_LBL_HIGHLIGHT TEXT("Highlight")
 #define BTN_LBL_UPDATE TEXT("Update")
 #define BTN_LBL_CANCEL TEXT("Cancel")
+#define BTN_LBL_NEXT TEXT(">")
+#define BTN_LBL_PREV TEXT("<")
 
 #define CHK_BOX_LABEL_CASE TEXT("Case Sensitive")
 #define CHK_BOX_LABEL_WORD TEXT("Whole Words only")
@@ -158,6 +160,16 @@ This should be big enough to hold itoa(MAX_LINES_SUPPORTED) + " : "
 #define CHKBOX_REGEX_W SP_CHECKBOX_W
 #define CHKBOX_REGEX_H SP_CHECKBOX_H
 
+#define PREV_BTN_X(center) SP_CHECKBOX_X(center)
+#define PREV_BTN_Y (OUTPUT_LIST_Y - PREV_BTN_H - SP_MARGIN_V)
+#define PREV_BTN_W (20)
+#define PREV_BTN_H (20)
+
+#define NEXT_BTN_X(center) (PREV_BTN_X(center) + PREV_BTN_W)
+#define NEXT_BTN_Y PREV_BTN_Y
+#define NEXT_BTN_W PREV_BTN_W
+#define NEXT_BTN_H PREV_BTN_H
+
 #define OUTPUT_LIST_X (0)
 #define OUTPUT_LIST_Y (KW_LISTBOX_H + SP_MARGIN_V + SP_PADDING_V)
 
@@ -183,12 +195,14 @@ enum{
 	SP_InstanceHighlightButton,
 	SP_InstanceUpdateButton,
 	SP_InstanceCancelButton,
+	SP_InstanceNextButton,
+	SP_InstancePrevButton,
 	SP_InstanceCaseSensitivityCB,
 	SP_InstanceMatchWordCB,
 	SP_InstanceRegexCB,
 	SP_InstanceAboutWindowClass,
 	SP_InstanceAboutWindow,
-	SP_InstanceUpdateLink,
+	SP_InstanceUpdateLink
 };
 
 typedef enum {
@@ -197,21 +211,19 @@ typedef enum {
 	UI_MODE_EDIT_KW
 }SPUI_mode_t;
 
+typedef enum{
+	SPM_MATCH_FOUND = WM_APP + 1,
+	SPM_SEARCH_OVER,
+	SPM_TERMINATE
+}sp_custom_messages_t;
 
-struct UI_Keyword{
-
-	TCHAR *string;
-	int count;
-	COLORREF color;
-	bool case_flag;
-	bool word_flag;
-	bool regex_flag;
-
-	UI_Keyword(SearchPattern *keyword);
-	~UI_Keyword();
-
-	void update(SearchPattern *keyword);
-};
+typedef struct{
+	SearchPattern *pattern;
+	int line_number;
+	int line_length;
+	int match_start;
+	int match_length;
+}match_msg_t;
 
 /*
 List of matched segments for a given keyword in a given line.
@@ -220,10 +232,10 @@ Each matched line will have a member of this struct.
 struct MatchedSegment{
 	int from;
 	int length;
-	int style;
+	SearchPattern *pattern;
 	MatchedSegment *next;
 
-	MatchedSegment(int match_start, int match_length, int style);
+	MatchedSegment(int match_start, int match_length, SearchPattern *pattern);
 	~MatchedSegment();
 };
 
@@ -234,11 +246,11 @@ struct MatchedLine{
 	int line_number;
 	MatchedSegment *match_list;
 
-	MatchedLine(int line_number, int total_length, int match_from, int match_length, int style);
+	MatchedLine(int line_number, int total_length, int match_from, int match_length, SearchPattern *pattern);
 	~MatchedLine();
 
 	void FetchLine();
-	void AddMatch(int match_from, int match_length, int style);
+	void AddMatch(int match_from, int match_length, SearchPattern *pattern);
 	void Draw(HDC hdc, LPRECT full_rect);
 };
 
@@ -247,9 +259,19 @@ typedef struct{
 	WNDPROC proc;
 }TabControl;
 
+typedef enum{
+	FIRST,
+	NEXT,
+	LAST,
+	PREV
+}MatchIterType;
+
 class SearchPlusUI{
-	bool init_flag;
 	bool close_flag;
+	bool stop_flag;
+
+	DWORD thread_id;
+	HANDLE thread_handle;
 
 	HWND editor_handle;
 
@@ -269,6 +291,9 @@ class SearchPlusUI{
 	HWND update_button;
 	HWND cancel_button;
 
+	HWND next_button;
+	HWND prev_button;
+
 	HWND case_sensitivity_checkbox;
 	HWND whole_word_checkbox;
 	HWND plaintext_checkbox;
@@ -279,8 +304,12 @@ class SearchPlusUI{
 	HWND regex_cb_tooltip;
 	HWND whole_word_cb_tooltip;
 	HWND keyword_tooltip;
+	HWND next_btn_tooltip;
+	HWND prev_btn_tooltip;
 
 	HFONT font;
+
+	int total_matches;
 
 	int linecount;
 	int linecount_strlen;
@@ -303,21 +332,23 @@ class SearchPlusUI{
 	void create_controls(HWND parent);
 	bool create_sp_window();
 	bool create_about_window();
-	UI_Keyword *get_selected_keyword();
-
-	void hide_window();
+	SearchPattern *get_selected_keyword();
 
 	/*
 	Updates checkbox and input field values to reflect the passed keyword.
 	*/
-	void highlight_keyword(UI_Keyword *kw);
+	void highlight_keyword(SearchPattern *kw);
 	void reset_highlights();
 	void exit_edit();
+	void exit_search();
+
+	void register_window_classes();
 
 	/* this might as well be static */
 	static void handle_tab_order(HWND cur_wnd, HWND *windows, int count, bool forward);
 
 public:
+
 	HWND about_window;
 	HWND update_link;
 	HWND credit_text;
@@ -328,6 +359,10 @@ public:
 
 	int LaunchSearchPlusWindow();
 	int LaunchAboutWindow();
+	void CreatePluginWindow();
+	void LoadCurrentWord();
+
+	void Terminate();
 
 	void handle_window_create(HWND hwnd);
 	void handle_window_close();
@@ -360,21 +395,25 @@ public:
 
 	void goto_selected_line();
 
-	void handle_matching_line(int line_number, int line_length, SearchPattern *pat, int match_start, int match_length);
+	void send_match_msg(int line_number, int line_length, SearchPattern *pat, int match_start, int match_length);
+
+	void send_search_over();
+
+	void handle_matching_line(match_msg_t *msg);
 
 	void handle_window_activate(bool focus);
 
 	int handle_keys_tabbed_control(HWND hwnd, WPARAM wParam, LPARAM lParam);
 
-	void update_result_count(int count);
-
-	void handle_search_complete(int count, SearchPattern *patlist);
+	void handle_search_complete();
 
 	void handle_keywordlb_focuschange();
 
 	bool get_minmax_size(MINMAXINFO *minmax);
 
 	void stop_search();
+
+	void goto_match(MatchIterType type);
 };
 
 

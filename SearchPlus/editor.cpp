@@ -281,7 +281,6 @@ typedef enum{
 	SPM_NONE = WM_USER + 1,
 	SPM_START_SEARCH,
 	SPM_STOP_SEARCH,
-	SPM_ABORT_SEARCH,
 	SPM_QUIT_THREAD,
 	SPM_MAX_MSG
 }sp_message_t;
@@ -313,7 +312,6 @@ DWORD WINAPI SearchThread(LPVOID param)
 	SearchPattern *patterns = NULL;
 	MSG msg;
 	bool run = true;
-	HANDLE quit_event = NULL;
 
 	/* This will create message queue for this thread ! */
 	PeekMessage(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);
@@ -326,24 +324,23 @@ DWORD WINAPI SearchThread(LPVOID param)
 
 		case SPM_START_SEARCH:
 			SendMessage(npp_data.npp, NPPM_GETFULLCURRENTPATH, MAX_PATH, LPARAM(npp_data.current_file));
-			PAT_ResetMatchCount();
 			patterns = (SearchPattern*)(msg.wParam);
 			SearchPlus_int(patterns);
-			PAT_FreePatterns(patterns);
+			break;
+
+		case SPM_STOP_SEARCH:
+			if(msg.wParam){
+				SetEvent(HANDLE(msg.wParam));
+			}
 			break;
 
 		case SPM_QUIT_THREAD:
 			run = false;
-			quit_event = HANDLE(msg.wParam);
 			break;
 		}
 	}
 
 	CloseHandle(npp_data.search_thread);
-
-	if(quit_event){
-		SetEvent(quit_event);
-	}
 
 	return 0;
 }
@@ -366,25 +363,20 @@ static void SP_Initialize(NppData notpadPlusData)
 
 	UI_Initialize(notpadPlusData._nppHandle);
 
-	setCommand(0, TEXT("Search+"), UI_ShowSettingsWindow, shortcuts, false);
+	setCommand(0, TEXT("Search+"), UI_ShowPluginWindow, shortcuts, false);
 	setCommand(1, TEXT("About"), UI_ShowAboutWindow, &shortcuts[1], false);
 }
 
 static void SP_Terminate()
 {
 	TCHAR path[MAX_PATH] = TEXT("");
-	HANDLE quit_event;
 
 	if(SendMessage(npp_data.npp, NPPM_GETPLUGINSCONFIGDIR, MAX_PATH, LPARAM(path))){
 		SP_SaveConfig(path);
 	}
 
-	quit_event = CreateEvent(NULL, false, false, NULL);
-
 	PostThreadMessage(npp_data.threadid, SPM_STOP_SEARCH, 0, 0);
-	PostThreadMessage(npp_data.threadid, SPM_QUIT_THREAD, WPARAM(quit_event), 0);
-
-	WaitForSingleObject(quit_event, INFINITE);
+	PostThreadMessage(npp_data.threadid, SPM_QUIT_THREAD, 0, 0);
 
 	UI_Terminate();
 	PAT_DeleteAll();
@@ -596,8 +588,38 @@ int Ed_GetLine(int line_number, TCHAR *text, int max_length)
 	return 0;
 }
 
+int Ed_Search(SearchPattern *patterns)
+{
+	if(!patterns){
+		DBG_MSG("No patterns to search for");
+		return -1;
+	}
 
-#if 1
+	PostThreadMessage(npp_data.threadid, SPM_START_SEARCH, WPARAM(patterns), 0);
+
+	return 0;
+}
+
+int Ed_StopSearch()
+{
+	HANDLE stop_event;
+
+	stop_event = CreateEvent(NULL, false, false, NULL);
+	PostThreadMessage(npp_data.threadid, SPM_STOP_SEARCH, WPARAM(stop_event), 0);
+	WaitForSingleObject(stop_event, INFINITE);
+
+	return 0;
+}
+
+COLORREF Ed_GetColorFromStyle(int style)
+{
+	return g_style_color_map[style % SP_MAX_STYLE_ID];
+}
+
+
+
+/* Searching related stuff starts here */
+
 #define CHUNK_SIZE (1023)
 
 struct search_res_t{
@@ -668,34 +690,42 @@ static int handle_matches(HWND scintilla, char *text, search_res_t **results)
 }
 
 
-int Ed_Search()
+int sci_search(HWND scintilla, SearchPattern *pattern, int from, int to, int &match_start, int &match_length)
 {
-	SearchPattern *patterns = NULL;
+	Sci_TextToFind find_text;
+	unsigned int sci_flag = 0;
+	int result = -1;
 
-	PAT_GetPatterns(&patterns);
-
-	if(!patterns){
-		DBG_MSG("No patterns to search for");
+	if(from >= to)
 		return -1;
+
+	find_text.chrg.cpMin = from;
+	find_text.chrg.cpMax = to;
+	find_text.chrgText.cpMin = find_text.chrgText.cpMax = -1;
+
+	find_text.lpstrText = pattern->GetMultiByteText();
+
+	if(pattern->GetWholeWordStatus()){
+		sci_flag |= SCFIND_WHOLEWORD;
 	}
 
-	PostThreadMessage(npp_data.threadid, SPM_START_SEARCH, WPARAM(patterns), 0);
+	if(pattern->GetCaseSensitivity()){
+		sci_flag |= SCFIND_MATCHCASE;
+	}
 
-	return 0;
+	if(pattern->GetRegexStatus()){
+		sci_flag |= SCFIND_REGEXP;
+	}
+
+	result = SendMessage(scintilla, SCI_FINDTEXT, sci_flag, LPARAM(&find_text));
+
+	if(result >= 0){
+		match_start = result;
+		match_length = find_text.chrgText.cpMax - find_text.chrgText.cpMin;
+	}
+
+	return result;
 }
-
-int Ed_StopSearch()
-{
-	PostThreadMessage(npp_data.threadid, SPM_STOP_SEARCH, 0, 0);
-	return 0;
-}
-
-COLORREF Ed_GetColorFromStyle(int style)
-{
-	return g_style_color_map[style % SP_MAX_STYLE_ID];
-}
-
-
 
 /*
 Fetch a chunk of text from scintilla (line aligned) and search thru it.
@@ -721,10 +751,12 @@ So why reinvent a hexagonal wheel?
 	fed in order. It needs to insert them in order (use binary search as number of results can be high)
 
 */
+
+
 static int SearchPlus_int(SearchPattern *pat_list)
 {
 #ifdef _DEBUG
-	ULONGLONG before, after;
+	ULONGLONG before = 0, after = 0;
 #endif
 
 	MSG msg = {NULL, SPM_NONE, 0, 0, 0, {0, 0}};
@@ -743,18 +775,26 @@ static int SearchPlus_int(SearchPattern *pat_list)
 
 	int current_chunk_size = 0;
 
-	/* current position in the entire document (number of characters covered so far)*/
+	/* current position in the entire document (number of characters covered till previous chunk)*/
 	int doc_pos = 0;
-	/* position in the current buffer (number of characters covered so far)*/
+
+	/*
+	in case of scintilla search, this indicates offset from beginning of document.
+	in case of native regex search, this is an offset from beginning of current chunk
+	*/
 	int buf_pos = 0;
 
-	int line, pos;
+	int line, end_pos;
 
 	int match_count = 0, match_count_temp;
 	int match_start = 0, match_length = 0;
 
 	/* list of results found in the current iteration */
 	search_res_t *results = NULL;
+
+	bool native_search_required = false;
+
+	bool interrupted = false;
 
 	if(!temp_pat){
 		DBG_MSG("No patterns to search for");
@@ -765,47 +805,87 @@ static int SearchPlus_int(SearchPattern *pat_list)
 	before = GetTickCount();
 #endif
 
+	temp_pat = pat_list;
+
+	while(temp_pat){
+
+		if(!temp_pat->ScintillaCompatible()){
+			native_search_required = true;
+			break;
+		}
+		temp_pat = temp_pat->GetNext();
+	}
+
 	scintilla = get_current_scintilla();
 
 	linecount = SendMessage(scintilla, SCI_GETLINECOUNT, 0, 0);
 	docsize = SendMessage(scintilla, SCI_GETLENGTH, 0, 0);
 
-	buffer = new CHAR[(CHUNK_SIZE + 1)* sizeof(CHAR)];
+	if(native_search_required){
+		buffer = new CHAR[(CHUNK_SIZE + 1)* sizeof(CHAR)];
+		trange.chrg.cpMin = 0;
+		trange.chrg.cpMax = CHUNK_SIZE;
+		trange.lpstrText = buffer;
+	}
 
-	trange.chrg.cpMin = 0;
-	trange.chrg.cpMax = CHUNK_SIZE;
-	trange.lpstrText = buffer;
 
 	while(doc_pos != docsize){
 
 		/* Fetch next N lines of text so that number of bytes <= CHUNK_SIZE */
 		line = SendMessage(scintilla, SCI_LINEFROMPOSITION, doc_pos + CHUNK_SIZE, 0);
-		pos = SendMessage(scintilla, SCI_POSITIONFROMLINE, line, 0);
 
-		if(pos == doc_pos){
+		/* we need full lines: so rewind to the beginning of the last line number in this set of lines */
+		end_pos = SendMessage(scintilla, SCI_POSITIONFROMLINE, line, 0);
+
+		if(end_pos == doc_pos){
 			/* handle last line */
-			pos += (docsize - doc_pos > CHUNK_SIZE) ? CHUNK_SIZE : docsize - doc_pos;
+			end_pos += (docsize - doc_pos > CHUNK_SIZE) ? CHUNK_SIZE : docsize - doc_pos;
 		}
 
 		trange.chrg.cpMin = doc_pos;
-		trange.chrg.cpMax = pos;
+		trange.chrg.cpMax = end_pos;
 
-		buffer[0] = 0;
-		current_chunk_size = SendMessage(scintilla, SCI_GETTEXTRANGE, 0, LPARAM(&trange));
+		if(native_search_required){
+
+			buffer[0] = 0;
+			current_chunk_size = SendMessage(scintilla, SCI_GETTEXTRANGE, 0, LPARAM(&trange));
+
+			if(current_chunk_size < end_pos - doc_pos){
+				/* something went wrong : may be user trunkated the file? */
+				break;
+			}
+		}
 
 		temp_pat = pat_list;
 
 		while(temp_pat){
 
-			search_buffer = buffer;
-			buf_pos = 0;
+			if(temp_pat->ScintillaCompatible()){
 
-			while(temp_pat->Search(search_buffer, match_start, match_length)){
+				buf_pos = doc_pos;
 
-				add_match(temp_pat, doc_pos + buf_pos + match_start, match_length, &results);
-				search_buffer += match_start + match_length;
-				buf_pos += match_start + match_length;
+				/* scintilla search returns match_start from beginning of document */
+
+				while(-1 != sci_search(scintilla, temp_pat, buf_pos, end_pos, match_start, match_length)){
+					add_match(temp_pat, match_start, match_length, &results);
+					buf_pos = match_start + match_length;
+				}
 			}
+			else{
+
+				buf_pos = 0;
+				search_buffer = buffer;
+
+				/* the match_start value here is relative to current buffer */
+
+				while(temp_pat->Search(search_buffer, match_start, match_length)){
+
+					add_match(temp_pat, doc_pos + buf_pos + match_start, match_length, &results);
+					search_buffer += match_start + match_length;
+					buf_pos += match_start + match_length;
+				}
+			}
+
 
 			temp_pat = temp_pat->GetNext();
 		}
@@ -814,14 +894,14 @@ static int SearchPlus_int(SearchPattern *pat_list)
 
 		if(match_count_temp){
 			match_count += match_count_temp;
-			UI_UpdateResultCount(match_count);
 		}
 
-		doc_pos += current_chunk_size;
+		doc_pos = end_pos;
 
 		CheckSearchMsg(MSG_CHECK_ONCE, &msg);
 
 		if(msg.message == SPM_STOP_SEARCH){
+			interrupted = true;
 			break;
 		}
 	}
@@ -835,112 +915,10 @@ static int SearchPlus_int(SearchPattern *pat_list)
 
 	UI_HandleSearchComplete(match_count, pat_list);
 
-	return match_count;
-}
-#else
-
-/*
-Fetch one line at a time from scintilla and search for each pattern in it.
-Too much copying involved if the document contains a huge number of lines
-*/
-int SearchPlus_int()
-{
-	CHAR *line_buff = NULL;
-	int handle = -1;
-	int linecount = 0, loop, line_length;
-	HWND scintilla = NULL;
-	int current_buffer_length = 1024;
-	SearchPattern *pat_list = PAT_GetList();
-	SearchPattern *temp_pat = pat_list;
-	int match_count = -1;
-	int match_start, match_length;
-
-	if(!temp_pat){
-		DBG_MSG("No patterns to search for");
-		return -1;
+	if(interrupted && msg.wParam){
+		SetEvent((HANDLE)msg.wParam);
 	}
-
-	SendMessage(nppData._nppHandle, NPPM_GETCURRENTSCINTILLA, 0, LPARAM(&handle));
-
-	if(handle == -1){
-		DBG_MSG("Failed to get current scintilla");
-		return -1;
-	}
-
-	scintilla = handle ? nppData._scintillaSecondHandle : nppData._scintillaMainHandle;
-
-	linecount = SendMessage(scintilla, SCI_GETLINECOUNT, 0, 0);
-
-	if(!linecount){
-		goto exit;
-	}
-
-	line_buff = (CHAR*)calloc(current_buffer_length + 1, sizeof(TCHAR));
-
-	if(!line_buff){
-		DBG_MSG("Memory Error 0 : Please contact the developer");
-		goto exit;
-	}
-
-	match_count = 0;
-
-	for(loop = 0; loop < linecount; loop++){
-
-		line_length = ::SendMessage(scintilla, SCI_LINELENGTH, loop, 0);
-
-		if(!line_length)
-			continue;
-
-		if(line_length > current_buffer_length){
-			current_buffer_length = line_length;
-			line_buff = (CHAR*)realloc(line_buff, line_length + 1);
-
-			if(!line_buff){
-				DBG_MSG("Memory Error 1 : Please contact the developer");
-				goto exit;
-			}
-		}
-
-		::SendMessage(scintilla, SCI_GETLINE, loop, (LPARAM)line_buff);
-
-		line_buff[line_length] = 0;
-
-#if 0 /* trim eol chars */
-		while(line_length && (line_buff[line_length - 1] == TEXT('\n') || line_buff[line_length - 1] == TEXT('\r'))){
-			line_buff[line_length - 1] = TEXT('\0');
-			line_length--;
-		}
-
-		if(!line_length){
-			continue;
-		}
-#endif
-		temp_pat = pat_list;
-
-
-		while(temp_pat){
-
-			match_start = match_length = 0;
-
-			if(temp_pat->search(line_buff, match_start, match_length)){
-
-				handle_matching_line(loop, line_length, line_buff, temp_pat, match_start, match_length);
-				match_count++;
-				break;
-			}
-
-			temp_pat = temp_pat->next;
-		}
-	}
-
-exit:
-	if(line_buff)
-		free(line_buff);
 
 	return match_count;
 }
-
-
-
-#endif
 

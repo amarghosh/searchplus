@@ -36,7 +36,7 @@ const int nbFunc = 2;
 #define SEARCH_PLUS_PRIM_VERSION (0)
 #define SEARCH_PLUS_SEC_VERSION (1)
 
-#define SP_CUR_VER TEXT("0.1.5")
+#define SP_CUR_VER TEXT("0.1.6")
 
 #define SP_MAX_PATTERN_LENGTH (100)
 #define SP_MAX_STYLE_ID 5
@@ -50,18 +50,23 @@ const int nbFunc = 2;
 
 class SearchPattern{
 	TCHAR* text;
+	CHAR *text_mb;
 	regex *reg;
 	bool case_sensitive;
 	bool whole_words_flag;
 	bool is_regex;
+
+	bool scintilla_flag;
 	int style_id;
 
 	void generate_pattern(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
 	void destroy();
+	void check_scintilla_compatibility();
 	SearchPattern * next;
 
 public:
 	int count;
+
 	int GetStyle();
 	SearchPattern();
 	~SearchPattern();
@@ -69,10 +74,12 @@ public:
 	SearchPattern *Clone();
 
 	TCHAR * GetText();
+	CHAR * GetMultiByteText();
 	bool GetCaseSensitivity();
 	bool GetWholeWordStatus();
 	bool GetRegexStatus();
 	bool Search(CHAR *text, int &from, int &length);
+	bool ScintillaCompatible();
 
 	void Update(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
 
@@ -94,11 +101,10 @@ typedef enum{
 */
 void UI_Initialize(HWND parent_window);
 void UI_Terminate();
-void UI_ShowSettingsWindow();
+void UI_ShowPluginWindow();
 void UI_ShowAboutWindow();
 void UI_LoadPatterns(SearchPattern *pat_list);
 void UI_HandleMatchingLine(int line_number, int line_length, SearchPattern *pat, int from, int match_length);
-void UI_UpdateResultCount(int count);
 void UI_HandleSearchComplete(int count, SearchPattern *pat_list);
 
 /*
@@ -131,7 +137,7 @@ may be later reused for another editor as long as it provides these functionalit
 */
 
 /* Search for currently present patterns in the current document */
-int Ed_Search();
+int Ed_Search(SearchPattern *patterns);
 
 int Ed_StopSearch();
 

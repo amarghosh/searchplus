@@ -15,6 +15,7 @@ static int pat_count = 0;
 SearchPattern::SearchPattern()
 {
 	text = NULL;
+	text_mb = NULL;
 	reg = NULL;
 
 	case_sensitive = false;
@@ -43,12 +44,49 @@ static void escape_regex_chars(TCHAR *dst, TCHAR *src)
 		case TEXT('?'):
 		case TEXT('^'):
 		case TEXT('$'):
+		case TEXT('|'):
 			*dst++ = TEXT('\\');
 			break;
 		}
 
 		*dst++ = *src++;
 		*dst = 0;
+	}
+}
+
+/*
+To decide whether this pattern can be searched for using scintilla's inbuilt search.
+
+Scintilla doesn't support few regex features. As a result, if the pattern contains regex
+literals not supported by scintilla, we must use native regex search.
+
+The assumption is that scintilla search will be faster for larger files
+as there is no extra buffer handling involved.
+
+Private function to be called only after populating text_mb
+*/
+void SearchPattern::check_scintilla_compatibility()
+{
+	CHAR *iter = this->text_mb;
+
+	scintilla_flag = true;
+
+	if(!is_regex){
+		return;
+	}
+
+	while(*iter){
+
+		switch(*iter){
+
+		case '(':
+		case ')':
+		case '|':
+			scintilla_flag = false;
+			return;
+		}
+
+		iter++;
 	}
 }
 
@@ -135,7 +173,7 @@ void SearchPattern::generate_pattern(TCHAR *str, bool case_sensitive, bool whole
 
 	this->text[length] = 0;
 
-	wcstombs_s(&convert_length, temp, sizeof(temp), this->text, length * sizeof(TCHAR));
+	wcstombs_s(&convert_length, temp, sizeof(temp), this->text, sizeof(temp));
 
 	this->reg = new regex(temp, regex_flags);
 
@@ -143,6 +181,12 @@ void SearchPattern::generate_pattern(TCHAR *str, bool case_sensitive, bool whole
 		/* keep the text same as original */
 		wcscpy_s(this->text, length + 1, str);
 	}
+
+	this->text_mb = new CHAR[length + 1];
+
+	wcstombs_s(&convert_length, this->text_mb, length + 1, this->text, length + 1);
+
+	check_scintilla_compatibility();
 
 	this->count = 0;
 }
@@ -152,6 +196,11 @@ void SearchPattern::destroy()
 	if(text){
 		delete text;
 		text = NULL;
+	}
+
+	if(text_mb){
+		delete text_mb;
+		text_mb = NULL;
 	}
 
 	if(reg){
@@ -204,6 +253,11 @@ TCHAR *SearchPattern::GetText()
 	return this->text;
 }
 
+CHAR * SearchPattern::GetMultiByteText()
+{
+	return text_mb;
+}
+
 bool SearchPattern::GetCaseSensitivity()
 {
 	return this->case_sensitive;
@@ -224,6 +278,10 @@ int SearchPattern::GetStyle()
 	return this->style_id;
 }
 
+bool SearchPattern::ScintillaCompatible()
+{
+	return scintilla_flag;
+}
 bool SearchPattern::Search(CHAR *text, int &from, int &length)
 {
 	cmatch res;
@@ -234,7 +292,6 @@ bool SearchPattern::Search(CHAR *text, int &from, int &length)
 
 	from = res.position(0);
 	length = res.length(0);
-	count++;
 	return true;
 }
 
