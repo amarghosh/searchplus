@@ -50,20 +50,29 @@ const int nbFunc = 1;
 class SearchPattern{
 	TCHAR* text;
 	regex *reg;
-	int length;
+	bool case_sensitive;
+	bool whole_words_flag;
 	bool is_regex;
 	int style_id;
+
+	void generate_pattern(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
+	void destroy();
 
 public:
 	int count;
 	int getStyle();
 	SearchPattern();
 	~SearchPattern();
-	SearchPattern(TCHAR *str, bool is_regex);
+	SearchPattern(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
 
 	SearchPattern * next;
 	TCHAR * getText();
+	bool getCaseSensitivity();
+	bool getWholeWordStatus();
+	bool getRegexStatus();
 	bool search(CHAR *text, int &from, int &length);
+
+	void update(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
 };
 
 typedef enum{
@@ -95,7 +104,9 @@ else return the zero based index of the pattern in the list
 */
 int PAT_GetIndex(TCHAR *str);
 
-SearchPattern * PAT_Add(TCHAR *str);
+SearchPattern * PAT_Add(TCHAR *str, bool case_sensitive, bool whole_words_only, bool regex_flag);
+SearchPattern * PAT_Update(int index, TCHAR *str, bool case_sensitive, bool whole_words_only, bool regex_flag);
+
 pat_err_t PAT_Delete(int index);
 pat_err_t PAT_DeleteAll();
 pat_err_t PAT_ResetMatchCount();

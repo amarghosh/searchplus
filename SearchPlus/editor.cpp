@@ -85,11 +85,16 @@ BOOL APIENTRY DllMain( HANDLE hModule,
 
     return TRUE;
 }
+#define KW_FLAG_CASE 0x1
+#define KW_FLAG_WORD 0x2
+#define KW_FLAG_PLAINTEXT 0x4
+
+#define SET_BIT(flags, value) flags |= value
 
 void LP_SaveConfig(TCHAR *config_path)
 {
 	TCHAR path[MAX_PATH] = TEXT("");
-	int length = 0, count = 0, loop = 0;
+	unsigned int length = 0, count = 0, loop = 0, flags = 0;
 	FILE *fp = NULL;
 	int version = 0;
 
@@ -128,8 +133,26 @@ void LP_SaveConfig(TCHAR *config_path)
 	temp_pat = pat_list;
 
 	while(temp_pat){
+
+		flags = 0;
+
+		if(temp_pat->getCaseSensitivity()){
+			SET_BIT(flags, KW_FLAG_CASE);
+		}
+
+		if(temp_pat->getWholeWordStatus()){
+			SET_BIT(flags, KW_FLAG_WORD);
+		}
+
+		if(!temp_pat->getRegexStatus()){
+			SET_BIT(flags, KW_FLAG_PLAINTEXT);
+		}
+
 		length = wcslen(temp_pat->getText());
-		fwrite(&length, sizeof(int), 1, fp);
+
+		flags = (flags << 16) | length;
+
+		fwrite(&flags, sizeof(int), 1, fp);
 		fwrite(temp_pat->getText(), sizeof(TCHAR), length, fp);
 		temp_pat = temp_pat->next;
 	}
@@ -142,9 +165,10 @@ void LP_LoadConfig(TCHAR *config_path)
 {
 	TCHAR path[MAX_PATH] = TEXT("");
 	TCHAR data[SP_MAX_PATTERN_LENGTH];
-	int length = 0, count = 0, loop = 0;
+	unsigned int length = 0, count = 0, loop = 0;
 	int file_version = 0, expected_version = 0;
 	FILE *fp = NULL;
+	int flags = 0;
 	
 	if(!config_path){
 		DBG_MSG("Failed to get config path");
@@ -164,7 +188,7 @@ void LP_LoadConfig(TCHAR *config_path)
 	expected_version = (SEARCH_PLUS_PRIM_VERSION << 16) | SEARCH_PLUS_SEC_VERSION;
 
 	/* validate version  */
-	if(1 != fread(&file_version, sizeof(int), 1, fp)){
+	if(1 != fread(&file_version, sizeof(unsigned int), 1, fp)){
 		DBG_MSG("failed to read version");
 		goto exit;
 	}
@@ -186,12 +210,16 @@ void LP_LoadConfig(TCHAR *config_path)
 			break;
 		}
 
+		flags = (length >> 16) & 0xFFFF;
+
+		length = length & 0xFFFF;
+
 		if(length != fread(data, sizeof(TCHAR), length, fp)){
 			DBG_MSG("Failed to read text");
 		}
 
 		data[length] = 0;
-		PAT_Add(data);
+		PAT_Add(data, !!(flags & KW_FLAG_CASE), !!(flags & KW_FLAG_WORD), !(flags & KW_FLAG_PLAINTEXT));
 	}
 
 exit:
@@ -255,7 +283,7 @@ DWORD WINAPI SearchThread(LPVOID param)
 
 			SendMessage(npp_data.npp, NPPM_GETFULLCURRENTPATH, MAX_PATH, LPARAM(npp_data.current_file));
 #ifdef _DEBUG
-			before = GetTickCount64();
+			before = GetTickCount();
 #endif
 			npp_data.search_flag = true;
 
@@ -264,7 +292,7 @@ DWORD WINAPI SearchThread(LPVOID param)
 
 			npp_data.search_flag = false;
 #ifdef _DEBUG
-			after = GetTickCount64();
+			after = GetTickCount();
 			after -= before;
 #endif
 		}
