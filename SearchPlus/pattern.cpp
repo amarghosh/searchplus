@@ -194,6 +194,8 @@ pat_err_t PAT_DeleteAll()
 
 	g_pat_list = NULL;
 
+	pat_count = 0;
+
 	return LP_SUCCESS;
 }
 
