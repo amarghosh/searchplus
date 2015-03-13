@@ -54,7 +54,6 @@ This should be big enough to hold itoa(MAX_LINES_SUPPORTED) + " : "
 #define SP_UIPANEL_MARGIN_H (20)
 #define SP_PANEL_WIDTH (((PATTERN_LISTBOX_WIDTH + SP_UIPANEL_MARGIN_H + SP_PADDING_HORI) * 2) + SP_CHECKBOX_WIDTH)
 
-
 #define RESULT_LBL_TEXT_LENGTH (30)
 #define SP_MARGIN_HORIZONTAL (5)
 #define SP_PADDING_HORI (3)
@@ -861,22 +860,6 @@ void SearchPlusUI::resize_controls()
 
 void SearchPlusUI::handle_window_create(HWND hwnd)
 {
-	RECT rect;
-	int width;
-#if 0
-	bool ret;
-
-	ret = GetWindowRect(main_window, &rect);
-
-	width = rect.right - rect.left;
-
-	if(width < SP_PANEL_WIDTH){
-		rect.left -= (SP_PANEL_WIDTH - width) / 2;
-		rect.right = rect.left + SP_PANEL_WIDTH;
-		MoveWindow(main_window, rect.left, rect.top, rect.right, rect.bottom, true);
-		width = SP_PANEL_WIDTH;
-	}
-#endif
 	create_controls(hwnd);
 	/* 
 	Update the window procedures of the controls to be included in tab navigation here
@@ -1561,13 +1544,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam)
 		PAT_ResetMatchCount();
 		ui_data->handle_window_close();
 		break;
-#if 1
+
 	case WM_GETMINMAXINFO:
 		if(ui_data->get_minmax_size((MINMAXINFO*)lParam)){
 			return 0;
 		}
 		break;
-#endif
+
 	case WM_SIZE:
 		ui_data->resize_controls();
 		break;
