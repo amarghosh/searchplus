@@ -123,13 +123,6 @@ int PAT_GetCount();
 void PAT_GetPatterns(SearchPattern **pat_list);
 void PAT_FreePatterns(SearchPattern *pat_list);
 
-#if 0
-/*
-TODO: Return a copy of list instead of the original copy of the Head.
-*/
-SearchPattern *PAT_GetList();
-#endif
-
 /*
 Interfaces to be implemented by the editor side of the plugin.
 
@@ -180,4 +173,3 @@ COLORREF Ed_GetColorFromStyle(int style);
 void Ed_InitHighlightMatches();
 
 #endif //SEARCHPLUS_NPP_PLUGIN_H
-

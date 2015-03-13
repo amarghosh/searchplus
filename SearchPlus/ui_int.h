@@ -20,6 +20,10 @@ The UI interfaces are defined in searchplus.h
 #define COLOR_SEL_BKG RGB(192, 192, 192)
 #define COLOR_WHITE RGB(255, 255, 255)
 
+#define MAX_TAB_CONTROLS (8)
+#define TAB_COUNT_NORMAL (6)
+#define TAB_COUNT_EDIT (4)
+
 
 /* strings used as labels for various control */
 #define BTN_LBL_ADD TEXT("Add")
@@ -238,6 +242,11 @@ struct MatchedLine{
 	void Draw(HDC hdc, LPRECT full_rect);
 };
 
+typedef struct{
+	HWND hwnd;
+	WNDPROC proc;
+}TabControl;
+
 class SearchPlusUI{
 	bool init_flag;
 	bool close_flag;
@@ -284,10 +293,7 @@ class SearchPlusUI{
 	** Save default window procedures for EDIT and BUTTON controls in these vars as these
 	** need to be invoked from the overriden procedures.
 	*/
-	WNDPROC edit_proc;
-	WNDPROC search_btn_proc;
-	WNDPROC list_proc;
-	WNDPROC add_proc;
+	TabControl tab_controls[MAX_TAB_CONTROLS];
 
 	SPUI_mode_t mode;
 
@@ -307,6 +313,9 @@ class SearchPlusUI{
 	void highlight_keyword(UI_Keyword *kw);
 	void reset_highlights();
 	void exit_edit();
+
+	/* this might as well be static */
+	static void handle_tab_order(HWND cur_wnd, HWND *windows, int count, bool forward);
 
 public:
 	HWND about_window;

@@ -475,10 +475,9 @@ void SearchPlusUI::create_controls(HWND parent)
 
 void SearchPlusUI::close_window()
 {
-	SetWindowLongPtr(input_field, GWLP_WNDPROC, (LONG_PTR)edit_proc);
-	SetWindowLongPtr(search_button, GWLP_WNDPROC, (LONG_PTR)search_btn_proc);
-	SetWindowLongPtr(keyword_listbox, GWLP_WNDPROC, (LONG_PTR)list_proc);
-	SetWindowLongPtr(add_button, GWLP_WNDPROC, (LONG_PTR)add_proc);
+	for(int loop = 0; loop < MAX_TAB_CONTROLS; loop++){
+		SetWindowLongPtr(tab_controls[loop].hwnd, GWLP_WNDPROC, (LONG_PTR)(tab_controls[loop].proc));
+	}
 
 	CloseWindow(main_window);
 	close_flag = true;
@@ -492,6 +491,12 @@ bool SearchPlusUI::create_sp_window()
 
 	if(init_flag)
 		return false;
+
+	for(int loop = 0; loop < MAX_TAB_CONTROLS; loop++){
+
+		tab_controls[loop].hwnd = 0;
+		tab_controls[loop].proc = NULL;
+	}
 
 	desktop = GetDesktopWindow();
 
@@ -603,16 +608,25 @@ void SearchPlusUI::resize_controls()
 void SearchPlusUI::handle_window_create(HWND hwnd)
 {
 	create_controls(hwnd);
+
 	/*
 	Update the window procedures of the controls to be included in tab navigation here
 	Keep the original and call it from the custom procedure
 	The procedures for similar controls can be different (not all buttons have same proc)
 	for ex, a button with a tooltip has a different procedure than the normal button
 	*/
-	edit_proc = (WNDPROC)SetWindowLongPtr(input_field, GWLP_WNDPROC, (LONG_PTR)TabbedControlProc);
-	search_btn_proc = (WNDPROC)SetWindowLongPtr(search_button, GWLP_WNDPROC, (LONG_PTR)TabbedControlProc);
-	list_proc = (WNDPROC)SetWindowLongPtr(keyword_listbox, GWLP_WNDPROC, (LONG_PTR)TabbedControlProc);
-	add_proc = (WNDPROC)SetWindowLongPtr(add_button, GWLP_WNDPROC, (LONG_PTR)TabbedControlProc);
+	tab_controls[0].hwnd = input_field;
+	tab_controls[1].hwnd  = reset_button;
+	tab_controls[2].hwnd  = remove_button;
+	tab_controls[3].hwnd  = add_button;
+	tab_controls[4].hwnd  = search_button;
+	tab_controls[5].hwnd  = cancel_button;
+	tab_controls[6].hwnd  = update_button;
+	tab_controls[7].hwnd  = keyword_listbox;
+
+	for(int loop = 0; loop < MAX_TAB_CONTROLS; loop++){
+		tab_controls[loop].proc = (WNDPROC)SetWindowLongPtr(tab_controls[loop].hwnd, GWLP_WNDPROC, (LONG_PTR)TabbedControlProc);
+	}
 }
 
 void SearchPlusUI::handle_add_button()
@@ -946,66 +960,85 @@ void SearchPlusUI::goto_selected_line()
 
 WNDPROC SearchPlusUI::get_wnd_proc(HWND hwnd)
 {
-	if(hwnd == input_field){
-		return edit_proc;
-	}
-	else if(hwnd == keyword_listbox){
-		return list_proc;
-	}
-	else if(hwnd == add_button){
-		return add_proc;
-	}
-	else if(hwnd == search_button){
-		return search_btn_proc;
+	for(int loop = 0; loop < MAX_TAB_CONTROLS; loop++){
+
+		if(tab_controls[loop].hwnd == hwnd){
+			return tab_controls[loop].proc;
+		}
 	}
 
 	return NULL;
 }
-#define TAB_CTRL_COUNT (4)
+
+void SearchPlusUI::handle_tab_order(HWND cur_wnd, HWND *windows, int count, bool forward)
+{
+	int index;
+	HWND focused_window = NULL;
+
+	for(index = 0; (index < count) && (windows[index] != cur_wnd); index++);
+
+	if(index < TAB_COUNT_NORMAL){
+
+		focused_window = forward ? windows[++index % count] : windows[(index + count - 1) % count] ;
+		SetFocus(focused_window);
+	}
+}
+
 int SearchPlusUI::handle_keys_tabbed_control(HWND hwnd, WPARAM wParam, LPARAM lParam)
 {
-	HWND windows[TAB_CTRL_COUNT] = {input_field, add_button, search_button, keyword_listbox};
-	HWND focused_window = NULL;
-	int index;
+	HWND normal_mode_controls[TAB_COUNT_NORMAL] = {input_field, reset_button, remove_button, add_button, search_button, keyword_listbox};
+	HWND edit_mode_controls[TAB_COUNT_EDIT] = {input_field, cancel_button, update_button, keyword_listbox};
 	int retval = 0;
 	unsigned short shift = GetKeyState(VK_SHIFT);
 
 	if(wParam == VK_ESCAPE){
-		ui_data->handle_escape_key();
+		handle_escape_key();
 		return 0;
 	}
 
-	/* Don't do anything unless you are normal */
-	if(mode != UI_MODE_NORMAL){
-		return 1;
-	}
+	switch(mode){
 
-	if(wParam == VK_RETURN){
+	case UI_MODE_NORMAL:
+		if(wParam == VK_RETURN){
 
-		if(hwnd == input_field || hwnd == add_button){
-			ui_data->handle_add_button();
+			if(hwnd == input_field || hwnd == add_button){
+				handle_add_button();
+			}
+			else if(hwnd == search_button){
+				handle_search_button();
+			}
+			else if(hwnd == remove_button){
+				handle_remove_button();
+			}
+			else if(hwnd == reset_button){
+				handle_reset_button();
+			}
 		}
-		else if(hwnd == search_button){
-			ui_data->handle_search_button();
+		else if(wParam == VK_TAB){
+			handle_tab_order(hwnd, normal_mode_controls, TAB_COUNT_NORMAL, !(shift & 0x80));
 		}
-	}
-	else if(wParam == VK_TAB){
-
-		for(index = 0; (index < TAB_CTRL_COUNT) && (windows[index] != hwnd); index++);
-
-		if(index < TAB_CTRL_COUNT){
-
-			focused_window = (shift & 0x80) ? windows[(index + TAB_CTRL_COUNT - 1) % TAB_CTRL_COUNT] :
-				windows[++index % TAB_CTRL_COUNT];
-
-			SetFocus(focused_window);
+		else if(wParam == VK_DELETE && hwnd == keyword_listbox){
+			ui_data->handle_remove_button();
 		}
-	}
-	else if(wParam == VK_DELETE && hwnd == keyword_listbox){
-		ui_data->handle_remove_button();
-	}
-	else{
-		retval = 1;
+		else{
+			retval = 1;
+		}
+		break;
+
+	case UI_MODE_EDIT_KW:
+		if(wParam == VK_RETURN){
+
+			if(hwnd == input_field || hwnd == update_button){
+				ui_data->handle_update_button();
+			}
+			else if(hwnd == cancel_button){
+				ui_data->handle_cancel_button();
+			}
+		}
+		else if(wParam == VK_TAB){
+			handle_tab_order(hwnd, edit_mode_controls, TAB_COUNT_EDIT, !(shift & 0x80));
+		}
+		break;
 	}
 
 	return retval;
@@ -1221,11 +1254,15 @@ LRESULT CALLBACK TabbedControlProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPAR
 		retval = ui_data->handle_keys_tabbed_control(hWnd, wParam, lParam);
 	}
 
-	if(retval){
-		retval = CallWindowProc(proc, hWnd, iMessage, wParam, lParam);
+	if(iMessage == WM_CHAR && (wParam == VK_RETURN || wParam == VK_TAB || wParam == VK_ESCAPE)){
+		 return 0;
 	}
 
-	return retval;
+	if(retval){
+		return CallWindowProc(proc, hWnd, iMessage, wParam, lParam);
+	}
+
+	return 0;
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam)
