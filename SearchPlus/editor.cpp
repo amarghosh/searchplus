@@ -241,8 +241,9 @@ void Ed_HighlightWord(int line_number, int start_index, int match_length, int st
 DWORD WINAPI SearchThread(LPVOID param)
 {
 	DWORD wait_res;
+#ifdef _DEBUG
 	ULONGLONG before, after;
-
+#endif
 	while(true){
 		
 		wait_res = WaitForSingleObject(npp_data.search_event, INFINITE);
@@ -253,16 +254,19 @@ DWORD WINAPI SearchThread(LPVOID param)
 		if(wait_res == WAIT_OBJECT_0){
 
 			SendMessage(npp_data.npp, NPPM_GETFULLCURRENTPATH, MAX_PATH, LPARAM(npp_data.current_file));
-
+#ifdef _DEBUG
 			before = GetTickCount64();
+#endif
 			npp_data.search_flag = true;
 
 			PAT_ResetMatchCount();
 			SearchPlus_int(PAT_GetList());
 
 			npp_data.search_flag = false;
+#ifdef _DEBUG
 			after = GetTickCount64();
 			after -= before;
+#endif
 		}
 	}
 	
