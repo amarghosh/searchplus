@@ -73,6 +73,9 @@
     <ClCompile Include="pattern.cpp" />
     <ClCompile Include="ui.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <Resource Include="version.RES" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

@@ -42,4 +42,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Resource Include="version.RES">
+      <Filter>Resource Files</Filter>
+    </Resource>
+  </ItemGroup>
 </Project>
