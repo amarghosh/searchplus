@@ -30,6 +30,9 @@
     <ClInclude Include="searchplus.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ui_int.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="editor.cpp">

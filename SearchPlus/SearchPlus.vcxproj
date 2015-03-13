@@ -67,6 +67,7 @@
     <ClInclude Include="PluginInterface.h" />
     <ClInclude Include="Scintilla.h" />
     <ClInclude Include="searchplus.h" />
+    <ClInclude Include="ui_int.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="editor.cpp" />

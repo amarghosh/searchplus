@@ -16,7 +16,7 @@
 //Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 /*
-Search+ Plugin 
+Search+ Plugin
 amarghosh @ gmail dot com
 */
 
@@ -31,14 +31,15 @@ using namespace std;
 
 const TCHAR SP_PLUGIN_NAME[] = TEXT("Search+");
 
-const int nbFunc = 1;
+const int nbFunc = 2;
 
 #define SEARCH_PLUS_PRIM_VERSION (0)
 #define SEARCH_PLUS_SEC_VERSION (1)
 
+#define SP_CUR_VER TEXT("0.1.5")
 
 #define SP_MAX_PATTERN_LENGTH (100)
-#define LP_MAX_STYLE_ID 5
+#define SP_MAX_STYLE_ID 5
 
 /* Its a binary file now - should it be a text file of some kind? */
 #define SP_CONF_FILE_NAME TEXT("searchplus.dat")
@@ -57,30 +58,35 @@ class SearchPattern{
 
 	void generate_pattern(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
 	void destroy();
+	SearchPattern * next;
 
 public:
 	int count;
-	int getStyle();
+	int GetStyle();
 	SearchPattern();
 	~SearchPattern();
 	SearchPattern(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
+	SearchPattern *Clone();
 
-	SearchPattern * next;
-	TCHAR * getText();
-	bool getCaseSensitivity();
-	bool getWholeWordStatus();
-	bool getRegexStatus();
-	bool search(CHAR *text, int &from, int &length);
+	TCHAR * GetText();
+	bool GetCaseSensitivity();
+	bool GetWholeWordStatus();
+	bool GetRegexStatus();
+	bool Search(CHAR *text, int &from, int &length);
 
-	void update(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
+	void Update(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex);
+
+	SearchPattern *GetNext();
+	void SetNext(SearchPattern *pattern);
+
 };
 
 typedef enum{
-	LP_SUCCESS,
-	LP_FAILURE,
-	LP_REGEX_ERR,
-	LP_INVALID_ARGS,
-	LP_ALREADY_EXISTS
+	SP_SUCCESS,
+	SP_FAILURE,
+	SP_REGEX_ERR,
+	SP_INVALID_ARGS,
+	SP_ALREADY_EXISTS
 }pat_err_t;
 
 /*
@@ -89,8 +95,9 @@ typedef enum{
 void UI_Initialize(HWND parent_window);
 void UI_Terminate();
 void UI_ShowSettingsWindow();
+void UI_ShowAboutWindow();
 void UI_LoadPatterns(SearchPattern *pat_list);
-void UI_HandleMatchingLine(int line_number, int line_length, CHAR *text, SearchPattern *pat, int from, int match_length);
+void UI_HandleMatchingLine(int line_number, int line_length, SearchPattern *pat, int from, int match_length);
 void UI_UpdateResultCount(int count);
 void UI_HandleSearchComplete(int count, SearchPattern *pat_list);
 
@@ -98,7 +105,7 @@ void UI_HandleSearchComplete(int count, SearchPattern *pat_list);
 ** Pattern related APIs
 */
 
-/* 
+/*
 Returns -1 if the pattern doesn't exist.
 else return the zero based index of the pattern in the list
 */
@@ -111,13 +118,19 @@ pat_err_t PAT_Delete(int index);
 pat_err_t PAT_DeleteAll();
 pat_err_t PAT_ResetMatchCount();
 
+int PAT_GetCount();
+
+void PAT_GetPatterns(SearchPattern **pat_list);
+void PAT_FreePatterns(SearchPattern *pat_list);
+
+#if 0
 /*
 TODO: Return a copy of list instead of the original copy of the Head.
 */
 SearchPattern *PAT_GetList();
+#endif
 
-
-/* 
+/*
 Interfaces to be implemented by the editor side of the plugin.
 
 This is to make sure that npp specific functions are abstracted out so that UI/Pattern code
@@ -127,15 +140,20 @@ may be later reused for another editor as long as it provides these functionalit
 /* Search for currently present patterns in the current document */
 int Ed_Search();
 
-/* 
-Number of lines in current document 
+int Ed_StopSearch();
+
+/*
+Number of lines in current document
 
 TODO: interface to be updated to support searching in multiple tabs.
 */
 int Ed_GetLineCount();
 
+/* Fetch line */
+int Ed_GetLine(int line_number, TCHAR *text, int max_length);
+
 /*
-Scroll the `line_number` to view and select `match_length` characters 
+Scroll the `line_number` to view and select `match_length` characters
 from `start_index` in that particular line.
 
 If editor supports tabs, switch to correct tab (based on last searched tab).
@@ -146,7 +164,7 @@ void Ed_GotoMatch(int line_number, int start_index, int match_length);
 
 void Ed_HighlightWord(int line_number, int start_index, int match_length, int style);
 
-/* 
+/*
 Get default word to be populated in the input text field.
 `max_length` is an in-out variable that gives max characters allocated for `word`
 and returns actual number of characters copied.

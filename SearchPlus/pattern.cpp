@@ -15,16 +15,21 @@ static int pat_count = 0;
 SearchPattern::SearchPattern()
 {
 	text = NULL;
-	case_sensitive = 0;
+	reg = NULL;
+
+	case_sensitive = false;
+	whole_words_flag = false;
+	is_regex = true;
+
 	next = NULL;
 	count = 0;
 	style_id = 0;
 }
 
-void escape_regex_chars(TCHAR *dst, TCHAR *src)
+static void escape_regex_chars(TCHAR *dst, TCHAR *src)
 {
 	while(*src){
-			
+
 		switch(*src){
 
 		case TEXT('('):
@@ -52,11 +57,11 @@ void SearchPattern::generate_pattern(TCHAR *str, bool case_sensitive, bool whole
 	int length, reg_count = 0;
 	size_t convert_length = 0;
 	regex_constants::syntax_option_type regex_flags = (regex_constants::syntax_option_type)0;
-	/* 
+	/*
 	Accomodate possible escape characters in case of non-regex patterns.
 	Add 4 bytes for \b in case of whole word matching
 	*/
-	char temp[SP_MAX_PATTERN_LENGTH * 2 + 4 + 1] = {0}; 
+	char temp[SP_MAX_PATTERN_LENGTH * 2 + 4 + 1] = {0};
 
 	length = wcslen(str);
 
@@ -68,7 +73,7 @@ void SearchPattern::generate_pattern(TCHAR *str, bool case_sensitive, bool whole
 	if(!use_regex){
 
 		for(int loop = 0; loop < length; loop++){
-			
+
 			switch(str[loop]){
 
 			case TEXT('('):
@@ -102,8 +107,8 @@ void SearchPattern::generate_pattern(TCHAR *str, bool case_sensitive, bool whole
 
 	this->text[0] = 0;
 
-	/* 
-	Since input string is wchar, it would be easier to generate the required regex string 
+	/*
+	Since input string is wchar, it would be easier to generate the required regex string
 	using the input and then convert it to ascii for regex, as npp text is ascii.
 	Ultimately, store the input string in its original form as that's what we show it to user
 	*/
@@ -158,48 +163,68 @@ void SearchPattern::destroy()
 SearchPattern::SearchPattern(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex)
 {
 	generate_pattern(str, case_sensitive, whole_words_only, use_regex);
-	this->style_id = pat_count++ % LP_MAX_STYLE_ID;
+	this->style_id = pat_count++ % SP_MAX_STYLE_ID;
 	this->next = NULL;
 }
 
-void SearchPattern::update(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex)
+void SearchPattern::Update(TCHAR *str, bool case_sensitive, bool whole_words_only, bool use_regex)
 {
 	destroy();
 	generate_pattern(str, case_sensitive, whole_words_only, use_regex);
 }
 
+SearchPattern* SearchPattern::GetNext()
+{
+	return next;
+}
+
+void SearchPattern::SetNext(SearchPattern *pattern)
+{
+	next = pattern;
+}
 
 SearchPattern::~SearchPattern()
 {
 	destroy();
 }
 
-TCHAR *SearchPattern::getText()
+SearchPattern * SearchPattern::Clone()
+{
+	SearchPattern *cloned = new SearchPattern();
+
+	cloned->generate_pattern(this->GetText(), this->case_sensitive, this->whole_words_flag, this->is_regex);
+	cloned->style_id = this->style_id;
+	cloned->count = 0;
+
+	return cloned;
+}
+
+TCHAR *SearchPattern::GetText()
 {
 	return this->text;
 }
 
-bool SearchPattern::getCaseSensitivity()
+bool SearchPattern::GetCaseSensitivity()
 {
 	return this->case_sensitive;
 }
 
-bool SearchPattern::getWholeWordStatus()
+bool SearchPattern::GetWholeWordStatus()
 {
 	return this->whole_words_flag;
 }
 
-bool SearchPattern::getRegexStatus()
+bool SearchPattern::GetRegexStatus()
 {
 	return this->is_regex;
 }
 
-int SearchPattern::getStyle()
+int SearchPattern::GetStyle()
 {
 	return this->style_id;
 }
 
-bool SearchPattern::search(CHAR *text, int &from, int &length)
+bool SearchPattern::Search(CHAR *text, int &from, int &length)
 {
 	cmatch res;
 
@@ -226,12 +251,12 @@ int PAT_GetIndex(TCHAR *str)
 
 	while(pat){
 
-		if(!wcscmp(str, pat->getText())){
+		if(!wcscmp(str, pat->GetText())){
 			return index;
 		}
 
 		index++;
-		pat = pat->next;
+		pat = pat->GetNext();
 	}
 
 	return -1;
@@ -261,10 +286,11 @@ SearchPattern * PAT_Add(TCHAR *str, bool case_sensitive, bool whole_words_only, 
 		g_pat_list = pat;
 	}
 	else{
-		while(iter->next){
-			iter = iter->next;
+		while(iter->GetNext()){
+			iter = iter->GetNext();
 		}
-		iter->next = pat;
+
+		iter->SetNext(pat);
 	}
 
 	return pat;
@@ -279,15 +305,15 @@ SearchPattern * PAT_Update(int index, TCHAR *str, bool case_sensitive, bool whol
 	}
 
 	for(int loop = 0; loop < index && iter != NULL; loop++){
-		iter = iter->next;
+		iter = iter->GetNext();
 	}
 
 	if(!iter){
 		return NULL;
 	}
 
-	iter->update(str, case_sensitive, whole_words_only, regex_flag);
-	
+	iter->Update(str, case_sensitive, whole_words_only, regex_flag);
+
 	return iter;
 }
 
@@ -299,23 +325,23 @@ pat_err_t PAT_Delete(int index)
 
 	while(pat != NULL && loop++ < index){
 		parent = pat;
-		pat = pat->next;
+		pat = pat->GetNext();
 	}
 
 	if(loop == index || pat == NULL){
-		return LP_FAILURE;
+		return SP_FAILURE;
 	}
 
 	if(parent == NULL){
-		g_pat_list = pat->next;
+		g_pat_list = pat->GetNext();
 		delete pat;
 	}
 	else{
-		parent->next = pat->next;
+		parent->SetNext(pat->GetNext());
 		delete pat;
 	}
 
-	return LP_SUCCESS;
+	return SP_SUCCESS;
 }
 
 pat_err_t PAT_ResetMatchCount()
@@ -324,10 +350,10 @@ pat_err_t PAT_ResetMatchCount()
 
 	while(pat){
 		pat->count = 0;
-		pat = pat->next;
+		pat = pat->GetNext();
 	}
 
-	return LP_SUCCESS;
+	return SP_SUCCESS;
 }
 
 pat_err_t PAT_DeleteAll()
@@ -337,7 +363,7 @@ pat_err_t PAT_DeleteAll()
 	int loop = 0;
 
 	while(pat){
-		temp = pat->next;
+		temp = pat->GetNext();
 		delete pat;
 		pat = temp;
 	}
@@ -346,24 +372,46 @@ pat_err_t PAT_DeleteAll()
 
 	pat_count = 0;
 
-	return LP_SUCCESS;
+	return SP_SUCCESS;
 }
 
 
-int LP_get_pattern_count()
+void PAT_GetPatterns(SearchPattern **pat_list)
 {
-	SearchPattern *pat = g_pat_list;
-	int count = 0;
+	SearchPattern *orig_list_iter = g_pat_list;
+	SearchPattern *parent = NULL;
+	SearchPattern *pattern = NULL;
 
-	while(pat){
-		count++;
-		pat = pat->next;
+	if(!pat_list){
+		throw TEXT("Null param");
 	}
 
-	return count;
+	*pat_list = NULL;
+
+	while(orig_list_iter){
+
+		pattern = orig_list_iter->Clone();
+
+		if(!parent){
+			*pat_list = pattern;
+		}
+		else{
+			parent->SetNext(pattern);
+		}
+
+		parent = pattern;
+		orig_list_iter = orig_list_iter->GetNext();
+	}
 }
 
-SearchPattern *PAT_GetList()
+void PAT_FreePatterns(SearchPattern *pat_list)
 {
-	return g_pat_list;
+	SearchPattern *iter = pat_list;
+
+	while(iter){
+		iter = pat_list->GetNext();
+		delete pat_list;
+		pat_list = iter;
+	}
 }
+

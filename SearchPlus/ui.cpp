@@ -1,5 +1,5 @@
 /*
-Search+ Plugin 
+Search+ Plugin
 amarghosh @ gmail dot com
 */
 
@@ -8,138 +8,69 @@ amarghosh @ gmail dot com
 #include <CommCtrl.h>
 
 #include "searchplus.h"
+#include "ui_int.h"
 
-#define MAX_LINES_SUPPORTED (10000000)
 
 #define EMPTY_STRING TEXT("")
 
-/* strings used in UI */
-#define BTN_LBL_ADD TEXT("Add")
-#define BTN_LBL_DELETE TEXT("Delete")
-#define BTN_LBL_RESET TEXT("Reset")
-#define BTN_LBL_SEARCH TEXT("Search")
-#define BTN_LBL_COPY TEXT("Ctrl+C")
-#define BTN_LBL_HIGHLIGHT TEXT("Highlight")
-#define BTN_LBL_UPDATE TEXT("Update")
-#define BTN_LBL_CANCEL TEXT("Cancel")
 
-#define CHK_BOX_LABEL_CASE TEXT("Case Sensitive")
-#define CHK_BOX_LABEL_WORD TEXT("Whole Words only")
-#define CHK_BOX_LABEL_REGEX TEXT("Use plain text")
+static const TCHAR sp_wnd_classname[] = TEXT("SP_Window");
+static const TCHAR about_wnd_classname[] = TEXT("SP_AboutWindow");
 
-#define LIST_LBL_NORMAL TEXT("Add keywords to the list and click Search")
-#define LIST_LBL_EDIT TEXT("Edit the text and flags and click Update")
-
-/*
-This should be big enough to hold itoa(MAX_LINES_SUPPORTED) + " : "
-*/
-#define NUM_LENGTH (15)
-
-#define COLOR_NORMAL RGB(0, 0, 0)
-#define COLOR_LINE_NUM RGB(128, 128, 128)
-#define COLOR_SEL_BKG RGB(192, 192, 192)
-#define COLOR_WHITE RGB(255, 255, 255)
-
-/* DrawText flags */
-#define DT_FLAGS (DT_EXPANDTABS | DT_NOCLIP | DT_SINGLELINE)
-
-/* Window transparency */
-#define ALPHA_OPAQUE (255)
-#define ALPHA_SEE_THRU (192)
-
-/* macros for positioning various controls */
-
-#define SP_WINDOW_HEIGHT (500)
-
-#define SP_UIPANEL_MARGIN_H (20)
-#define SP_PANEL_WIDTH (((PATTERN_LISTBOX_WIDTH + SP_UIPANEL_MARGIN_H + SP_PADDING_HORI) * 2) + SP_CHECKBOX_WIDTH)
-
-#define RESULT_LBL_TEXT_LENGTH (30)
-#define SP_MARGIN_HORIZONTAL (5)
-#define SP_PADDING_HORI (3)
-#define SP_Y_OFFSET (5)
-
-#define SP_INPUTLABEL_WIDTH 150
-#define SP_LISTLABEL_WIDTH 260
-#define SP_RESLABEL_WIDTH 200
-
-#define SP_CHECKBOX_WIDTH (150)
-#define SP_CHECKBOX_HEIGHT (20)
-
-#define SP_ROW_HEIGHT (22)
-#define SP_LBL_HEIGHT (15)
-
-#define SP_LIST_HEIGHT (100)
-
-#define SP_LIST_Y SP_Y_OFFSET
-
-#define SP_TA_X (0)
-#define SP_TA_Y (SP_LIST_HEIGHT + (2 * SP_Y_OFFSET))
-
-#define SP_INPUT_Y (SP_Y_OFFSET + SP_LBL_HEIGHT)
-
-#define SP_BTN_Y (SP_ROW_HEIGHT + (SP_Y_OFFSET) + SP_INPUT_Y)
-#define SP_BTN_WIDTH (70)
-#define SP_ADD_BTN_WIDTH (100)
-
-#define SP_COPY_BTN_WIDTH 80
-
-#define COPY_BTN_X(width) width / 2 + SP_PADDING_HORI * 2 + PATTERN_LISTBOX_WIDTH
-
-#define HIGHLIGHT_BTN_WIDTH 80
-#define HIGHLIGHT_BTN_X(width) COPY_BTN_X(width) - HIGHLIGHT_BTN_WIDTH - (SP_PADDING_HORI / 2)
-
-#define PATTERN_LISTBOX_WIDTH (300)
-
-static const TCHAR className[] = TEXT("SP_Window");
-
+/* plugin window procedure */
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam);
 
-/* 
-window procedures to handle tabbed navigation, simulate button click on enter key 
+/* about window procedure */
+static LRESULT CALLBACK AboutWndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam);
+
+/*
+window procedures to handle tabbed navigation, simulate button click on enter key
 and to hide window on hitting escape.
 */
 static LRESULT CALLBACK TabbedControlProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam);
 
-struct keyword_t{
+static SearchPlusUI *ui_data;
 
-	TCHAR *string;
-	int count;
-	COLORREF color;
-	bool case_flag;
-	bool word_flag;
-	bool regex_flag;
-	
-	keyword_t(SearchPattern *keyword);
 
-	~keyword_t(){
-		if(string)
-			delete string;
-	}
+/* draw the text from left edge of the given rectangle and moves rectangles horizontal edges */
+static void draw_text(HDC hdc, TCHAR *text, int length, LPRECT rect, COLORREF textcolor)
+{
+	int rightend = rect->right;
 
-	void update(SearchPattern *keyword);
-};
+	SetTextColor(hdc, textcolor);
+	DrawText(hdc, text, length, rect, DT_FLAGS | DT_CALCRECT);
+	DrawText(hdc, text, length, rect, DT_FLAGS);
+	rect->left = rect->right;
+	rect->right = rightend;
+}
 
 /* Don't give me NULL */
-keyword_t::keyword_t(SearchPattern *keyword)
+UI_Keyword::UI_Keyword(SearchPattern *keyword)
 {
-	TCHAR *text = keyword->getText();
+	TCHAR *text = keyword->GetText();
 	int length = wcslen(text);
 
 	string = new TCHAR[length + 1];
 	wcscpy_s(string, length + 1, text);
 
-	this->color = Ed_GetColorFromStyle(keyword->getStyle());
-	this->case_flag = keyword->getCaseSensitivity();
-	this->word_flag = keyword->getWholeWordStatus();
-	this->regex_flag = keyword->getRegexStatus();
+	this->color = Ed_GetColorFromStyle(keyword->GetStyle());
+	this->case_flag = keyword->GetCaseSensitivity();
+	this->word_flag = keyword->GetWholeWordStatus();
+	this->regex_flag = keyword->GetRegexStatus();
 
 	count = 0;
 }
 
-void keyword_t::update(SearchPattern *keyword)
+UI_Keyword::~UI_Keyword()
 {
-	TCHAR *text = keyword->getText();
+	if(string){
+		delete string;
+	}
+}
+
+void UI_Keyword::update(SearchPattern *keyword)
+{
+	TCHAR *text = keyword->GetText();
 	int length = wcslen(text);
 
 	if(string){
@@ -149,66 +80,25 @@ void keyword_t::update(SearchPattern *keyword)
 	string = new TCHAR[length + 1];
 	wcscpy_s(string, length + 1, text);
 
-	this->color = Ed_GetColorFromStyle(keyword->getStyle());
-	this->case_flag = keyword->getCaseSensitivity();
-	this->word_flag = keyword->getWholeWordStatus();
-	this->regex_flag = keyword->getRegexStatus();
+	this->color = Ed_GetColorFromStyle(keyword->GetStyle());
+	this->case_flag = keyword->GetCaseSensitivity();
+	this->word_flag = keyword->GetWholeWordStatus();
+	this->regex_flag = keyword->GetRegexStatus();
 
 	count = 0;
 }
 
-
-struct matched_segment_t{
-	int from;
-	int length;
-	int style;
-	matched_segment_t *next;
-
-	matched_segment_t(int match_start, int match_length, int style);
-	~matched_segment_t();
-};
-
-/* data item for the output listbox */
-struct matched_line_t{
-	TCHAR *text;
-	int line_length;
-	int line_number;
-	matched_segment_t *match_list;
-
-	matched_line_t(TCHAR *matched_line, int total_length, int line_number, int match_from, int match_length, int style);
-	~matched_line_t();
-
-	void add_match(int match_from, int match_length, int style);
-	void draw_item(HDC hdc, LPRECT full_rect);
-};
-
-matched_segment_t::matched_segment_t(int match_start, int match_length, int style)
-{
-	from = match_start;
-	length = match_length;
-	this->style = style;
-	next = NULL;
-}
-
-matched_segment_t::~matched_segment_t()
-{
-	if(next){
-		delete next;
-	}
-}
-
-matched_line_t::matched_line_t(TCHAR *matched_line, int total_length, int line_number, int match_from, int match_length, int style)
+MatchedLine::MatchedLine(int line_number, int total_length, int match_from, int match_length, int style)
 {
 	this->line_number = line_number;
 	this->line_length = total_length;
 
-	this->text = new TCHAR[total_length + 1];
-	wcscpy_s(text, total_length + 1, matched_line);
+	this->text = NULL;
 
-	this->match_list = new matched_segment_t(match_from, match_length, style);
+	this->match_list = new MatchedSegment(match_from, match_length, style);
 }
 
-matched_line_t::~matched_line_t()
+MatchedLine::~MatchedLine()
 {
 	if(text)
 		delete text;
@@ -216,12 +106,25 @@ matched_line_t::~matched_line_t()
 	delete match_list;
 }
 
-void matched_line_t::add_match(int match_from, int match_length, int style)
+void MatchedLine::FetchLine()
 {
-	matched_segment_t *last_match = this->match_list;
+	if(text){
+		return;
+	}
+
+	text = new TCHAR[line_length + 1];
+
+	text[0] = 0;
+
+	Ed_GetLine(line_number, text, line_length + 1);
+}
+
+void MatchedLine::AddMatch(int match_from, int match_length, int style)
+{
+	MatchedSegment *last_match = this->match_list;
 
 	if(!last_match){
-		this->match_list = new matched_segment_t(match_from, match_length, style);
+		this->match_list = new MatchedSegment(match_from, match_length, style);
 	}
 	else{
 
@@ -234,53 +137,61 @@ void matched_line_t::add_match(int match_from, int match_length, int style)
 			return;
 		}
 
-		if((match_from >= last_match->from) && 
+		if((match_from >= last_match->from) &&
 				(match_from + match_length <= last_match->from + last_match->length)){
 
-			/* 
+			/*
 			if multiple keywords match the same sequence or subsequence of characters,
 			highlight only the first one and ignore the rest.
 			*/
 			return;
 		}
 
-		if((match_from < last_match->from + last_match->length) && 
+		if((match_from < last_match->from + last_match->length) &&
 				(match_from + match_length > last_match->from + last_match->length)){
 
 			match_length = match_from + match_length - (last_match->from + last_match->length);
 			match_from = last_match->from + last_match->length;
 		}
 
-		last_match->next = new matched_segment_t(match_from, match_length, style);
+		last_match->next = new MatchedSegment(match_from, match_length, style);
 	}
 }
 
-static void draw_text(HDC hdc, TCHAR *text, int length, LPRECT rect, COLORREF textcolor)
+MatchedSegment::MatchedSegment(int match_start, int match_length, int style)
 {
-	int rightend = rect->right;
-
-	SetTextColor(hdc, textcolor);
-	DrawText(hdc, text, length, rect, DT_FLAGS | DT_CALCRECT);
-	DrawText(hdc, text, length, rect, DT_FLAGS);
-	rect->left = rect->right;
-	rect->right = rightend;
+	from = match_start;
+	length = match_length;
+	this->style = style;
+	next = NULL;
 }
 
-void matched_line_t::draw_item(HDC hdc, LPRECT full_rect)
+MatchedSegment::~MatchedSegment()
+{
+	if(next){
+		delete next;
+	}
+}
+
+void MatchedLine::Draw(HDC hdc, LPRECT full_rect)
 {
 	int cur_pos = 0;
 	int segment_length = 0;
 	RECT segment_rect = *full_rect;
-	matched_segment_t *matchlist = this->match_list;
+	MatchedSegment *current_segment = this->match_list;
 	TCHAR *text_segment;
-	
+
 	text_segment = new TCHAR[this->line_length + 1];
 
-	while(matchlist){
+	if(!text){
+		FetchLine();
+	}
 
-		if(cur_pos < matchlist->from){
-			
-			segment_length = matchlist->from - cur_pos;
+	while(current_segment){
+
+		if(cur_pos < current_segment->from){
+
+			segment_length = current_segment->from - cur_pos;
 			wcsncpy_s(text_segment, line_length + 1, text + cur_pos, segment_length);
 			text_segment[segment_length] = 0;
 
@@ -289,181 +200,29 @@ void matched_line_t::draw_item(HDC hdc, LPRECT full_rect)
 			cur_pos += segment_length;
 		}
 
-		wcsncpy_s(text_segment, line_length + 1, text + cur_pos, matchlist->length);
-		text_segment[matchlist->length] = 0;
+		wcsncpy_s(text_segment, line_length + 1, text + cur_pos, current_segment->length);
+		text_segment[current_segment->length] = 0;
 
-		draw_text(hdc, text_segment, matchlist->length, &segment_rect, Ed_GetColorFromStyle(matchlist->style));
+		draw_text(hdc, text_segment, current_segment->length, &segment_rect, Ed_GetColorFromStyle(current_segment->style));
 
-		cur_pos += matchlist->length;
+		cur_pos += current_segment->length;
 
-		matchlist = matchlist->next;
+		current_segment = current_segment->next;
 	}
 
 	segment_length = this->line_length - cur_pos;
-	wcsncpy_s(text_segment, line_length + 1, text + cur_pos, segment_length);
-	draw_text(hdc, text_segment, segment_length, &segment_rect, COLOR_NORMAL);
+
+	if(segment_length){
+		wcsncpy_s(text_segment, line_length + 1, text + cur_pos, segment_length);
+		draw_text(hdc, text_segment, segment_length, &segment_rect, COLOR_NORMAL);
+	}
 
 	delete text_segment;
 }
 
-enum{
-	SP_InstanceNone,
-	SP_InstanceWndClass,
-	SP_InstanceMainWindow,
-	SP_InstanceInputField,
-	SP_InstanceAddButton,
-	SP_InstancePatternList,
-	SP_InstanceOutputArea,
-	SP_InstanceRemoveButton,
-	SP_InstanceClearButton,
-	SP_InstanceSearchButton,
-	SP_InstanceClipboardButton,
-	SP_InstanceHighlightButton,
-	SP_InstanceUpdateButton,
-	SP_InstanceCancelButton,
-	SP_InstanceCaseSensitivityCB,
-	SP_InstanceMatchWordCB,
-	SP_InstanceRegexCB
-};
-
-typedef enum {
-	UI_MODE_NORMAL,
-	UI_MODE_SEARCH,
-	UI_MODE_EDIT_KW
-}SPUI_mode_t;
-
-class SearchPlusUI{
-	bool init_flag;
-	bool close_flag;
-
-	HWND editor_handle;
-
-	HWND main_window;
-
-	HWND list_label;
-	HWND result_label;
-	HWND input_field;
-	HWND add_button;
-	HWND keyword_listbox;
-	HWND output_area;
-	HWND remove_button;
-	HWND reset_button;
-	HWND search_button;
-	HWND copy_button;
-	HWND highlight_button;
-	HWND update_button;
-	HWND cancel_button;
-
-	HWND case_sensitivity_checkbox;
-	HWND whole_word_checkbox;
-	HWND plaintext_checkbox;
-
-	HWND clipboard_tooltip;
-	HWND highlight_tooltip;
-	HWND add_tooltip;
-	HWND regex_cb_tooltip;
-	HWND whole_word_cb_tooltip;
-	HWND keyword_tooltip;
-
-	HFONT font;
-
-	int linecount;
-	int linecount_strlen;
-
-	/* sum of strlen of all matched strings : used for copy to clipboard allocation */
-	int total_strlen;
-
-	/* 
-	** EDIT and BUTTON controls are subclassed to handle key events (tab navigation etc).
-	** Save default window procedures for EDIT and BUTTON controls in these vars as these 
-	** need to be invoked from the overriden procedures.
-	*/
-	WNDPROC edit_proc;
-	WNDPROC search_btn_proc;
-	WNDPROC list_proc;
-	WNDPROC add_proc;
-
-	SPUI_mode_t mode;
-
-	HWND assign_tooltip(HWND button, HWND parent, TCHAR *text);
-	void create_controls(HWND parent);
-	bool create_window();
-	keyword_t *get_selected_keyword();
-
-	void hide_window();
-
-	/* 
-	Updates checkbox and input field values to reflect the passed keyword.
-	*/
-	void highlight_keyword(keyword_t *kw);
-	void reset_highlights();
-	void exit_edit();
-
-public:
-
-	SearchPlusUI(HWND npp);
-
-	~SearchPlusUI(){
-		if(!close_flag){
-			close_window();
-		}
-	}
-
-	int launch();
-
-	void handle_window_create(HWND hwnd);
-	void handle_window_close();
-	void close_window();
-	WNDPROC get_wnd_proc(HWND hwnd);
-
-	void handle_add_button();
-	void handle_remove_button();
-	void handle_reset_button();
-	void handle_search_button();
-	void handle_copy_button();
-	void handle_highlight_button();
-	void handle_cancel_button();
-	void handle_update_button();
-
-	void handle_keyword_selection();
-	void start_keyword_edit();
-
-	HBRUSH draw_checkbox(HWND checkbox, HDC hdc);
-
-	void handle_escape_key();
-
-	void resize_controls();
-
-	void draw_matched_string(LPDRAWITEMSTRUCT pDis);
-
-	void draw_keyword(LPDRAWITEMSTRUCT pDis);
-
-	void load_keywords(SearchPattern *pat_list);
-
-	void goto_selected_line();
-
-	void handle_matching_line(int line_number, int line_length, CHAR *text, SearchPattern *pat, int match_start, int match_length);
-
-	void handle_window_activate(bool focus);
-
-	int handle_keys_tabbed_control(HWND hwnd, WPARAM wParam, LPARAM lParam);
-
-	void update_result_count(int count);
-
-	void handle_search_complete(int count, SearchPattern *patlist);
-
-	void handle_keywordlb_focuschange();
-
-	bool get_minmax_size(MINMAXINFO *minmax);
-};
-
-
-static SearchPlusUI *ui_data;
-
-void SearchPlusUI::handle_matching_line(int line_number, int line_length, CHAR *text, SearchPattern *pat, int match_start, int match_length)
+void SearchPlusUI::handle_matching_line(int line_number, int line_length, SearchPattern *pat, int match_start, int match_length)
 {
-	TCHAR *temp = NULL;
-	matched_line_t *list_item = NULL;
+	MatchedLine *list_item = NULL;
 	int item_count;
 	RECT item_rect = {0, 0, 0, 0};
 
@@ -471,11 +230,11 @@ void SearchPlusUI::handle_matching_line(int line_number, int line_length, CHAR *
 
 	while(--item_count >= 0){
 
-		list_item = (matched_line_t*)SendMessage(output_area, LB_GETITEMDATA, item_count, 0);
-		
+		list_item = (MatchedLine*)SendMessage(output_area, LB_GETITEMDATA, item_count, 0);
+
 		if(list_item->line_number == line_number){
-		
-			list_item->add_match(match_start, match_length, pat->getStyle());
+
+			list_item->AddMatch(match_start, match_length, pat->GetStyle());
 			SendMessage(output_area, LB_GETITEMRECT, item_count, LPARAM(&item_rect));
 			InvalidateRect(output_area, &item_rect, true);
 			return;
@@ -485,35 +244,31 @@ void SearchPlusUI::handle_matching_line(int line_number, int line_length, CHAR *
 			break;
 	}
 
-	temp = new TCHAR[line_length + 1];
-
-	mbstowcs(temp, text, line_length);
-	temp[line_length] = 0;
-
 	total_strlen += line_length;
-	list_item = new matched_line_t(temp, line_length, line_number, match_start, match_length, pat->getStyle());
-	
-	SendMessage(output_area, LB_ADDSTRING, 0, (LPARAM)list_item);
+	list_item = new MatchedLine(line_number, line_length, match_start, match_length, pat->GetStyle());
 
-	delete temp;
+	SendMessage(output_area, LB_ADDSTRING, 0, (LPARAM)list_item);
 }
 
 void SearchPlusUI::update_result_count(int count)
 {
-	TCHAR text[RESULT_LBL_TEXT_LENGTH] = {0};
+	TCHAR text[RESULT_LABEL_TEXT_LENGTH] = {0};
 
 	wsprintf(text, TEXT("%d matches.."), count);
 
 	SendMessage(result_label, WM_SETTEXT, 0, LPARAM(text));
 }
 
-int SearchPlusUI::launch()
+int SearchPlusUI::LaunchSearchPlusWindow()
 {
 	TCHAR current_word[SP_MAX_PATTERN_LENGTH] = {0};
 	int sel_length = SP_MAX_PATTERN_LENGTH;
+	SearchPattern *pat_list = NULL;
 
-	if(ui_data->create_window()){
-		ui_data->load_keywords(PAT_GetList());
+	if(ui_data->create_sp_window()){
+		PAT_GetPatterns(&pat_list);
+		ui_data->load_keywords(pat_list);
+		PAT_FreePatterns(pat_list);
 	}
 
 	Ed_GetCurrentWord(current_word, sel_length);
@@ -534,6 +289,20 @@ SearchPlusUI::SearchPlusUI(HWND parent)
 	close_flag = false;
 	editor_handle = parent;
 	input_field = NULL;
+	about_window = NULL;
+
+	font = CreateFont(14, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS,
+		TEXT("Verdana"));
+}
+
+SearchPlusUI::~SearchPlusUI()
+{
+	if(!close_flag){
+		close_window();
+	}
+
+	DeleteObject(font);
 }
 
 HWND SearchPlusUI::assign_tooltip(HWND button, HWND parent, TCHAR *text)
@@ -541,12 +310,12 @@ HWND SearchPlusUI::assign_tooltip(HWND button, HWND parent, TCHAR *text)
 	TOOLINFO toolinfo = {0};
 	HWND tooltip;
 
-	tooltip = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS,NULL,	
+	tooltip = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS,NULL,
 		WS_POPUP | TTS_ALWAYSTIP | TTS_NOFADE | TTS_NOANIMATE,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, NULL, NULL, 0);
-	
+
 	if(!tooltip)
 		return NULL;
 
@@ -566,122 +335,110 @@ void SearchPlusUI::create_controls(HWND parent)
 	TOOLINFO toolinfo = {0};
 
 	input_field = ::CreateWindowEx(WS_EX_CLIENTEDGE,
-		TEXT("EDIT"), EMPTY_STRING,
+		WC_EDIT, EMPTY_STRING,
 		WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_GROUP | ES_AUTOHSCROLL,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceInputField),
 		HINSTANCE(SP_InstanceInputField), 0);
 
-	add_button = ::CreateWindowEx(0,
-		TEXT("BUTTON"), BTN_LBL_ADD,
+	add_button = ::CreateWindowEx(0, WC_BUTTON,	BTN_LBL_ADD,
 		WS_VISIBLE | WS_CHILD | WS_TABSTOP,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceAddButton),
 		HINSTANCE(SP_InstanceAddButton), 0);
 
-	keyword_listbox = ::CreateWindowEx(WS_EX_CLIENTEDGE,
-		TEXT("LISTBOX"), EMPTY_STRING,
+	keyword_listbox = ::CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTBOX, EMPTY_STRING,
 		WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_VSCROLL | LBS_WANTKEYBOARDINPUT |
 			LBS_OWNERDRAWFIXED | LBS_NOTIFY,
 		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-		parent,	HMENU(SP_InstancePatternList), 
+		parent,	HMENU(SP_InstancePatternList),
 		HINSTANCE(SP_InstancePatternList), 0);
 
 	output_area  = ::CreateWindowEx(WS_EX_CLIENTEDGE,
-		TEXT("LISTBOX"), EMPTY_STRING,
-		WS_VISIBLE | WS_CHILD | WS_TABSTOP |  WS_HSCROLL | WS_VSCROLL | 
-			LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_WANTKEYBOARDINPUT, 
+		WC_LISTBOX, EMPTY_STRING,
+		WS_VISIBLE | WS_CHILD | WS_TABSTOP |  WS_HSCROLL | WS_VSCROLL |
+			LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_WANTKEYBOARDINPUT,
 		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceOutputArea),
 		HINSTANCE(SP_InstanceOutputArea), 0);
 
-	remove_button = ::CreateWindowEx(0, TEXT("BUTTON"),
-		BTN_LBL_DELETE,
+	remove_button = ::CreateWindowEx(0, WC_BUTTON, BTN_LBL_DELETE,
 		WS_VISIBLE | WS_CHILD | WS_TABSTOP,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceRemoveButton),
 		HINSTANCE(SP_InstanceRemoveButton), 0);
 
-	reset_button = ::CreateWindowEx(0, TEXT("BUTTON"),
-		BTN_LBL_RESET,
+	reset_button = ::CreateWindowEx(0, WC_BUTTON, BTN_LBL_RESET,
 		WS_VISIBLE | WS_CHILD | WS_TABSTOP,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceClearButton),
 		HINSTANCE(SP_InstanceClearButton), 0);
 
-	search_button = CreateWindowEx(0, TEXT("BUTTON"),
-		BTN_LBL_SEARCH,
+	search_button = CreateWindowEx(0, WC_BUTTON, BTN_LBL_SEARCH,
 		WS_VISIBLE | WS_CHILD | WS_TABSTOP,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceSearchButton),
 		HINSTANCE(SP_InstanceSearchButton), 0);
 
-	list_label = CreateWindowEx(0, TEXT("STATIC"), LIST_LBL_NORMAL,
+	list_label = CreateWindowEx(0, WC_STATIC, LIST_LBL_NORMAL,
 		WS_VISIBLE | WS_CHILD | SS_EDITCONTROL,
-		CW_USEDEFAULT, CW_USEDEFAULT, 
-		CW_USEDEFAULT, CW_USEDEFAULT, 
+		CW_USEDEFAULT, CW_USEDEFAULT,
+		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, NULL, NULL, 0);
 
-	result_label = CreateWindowEx(0, TEXT("STATIC"), EMPTY_STRING,
+	result_label = CreateWindowEx(0, WC_STATIC, EMPTY_STRING,
 		WS_VISIBLE | WS_CHILD | SS_EDITCONTROL,
-		CW_USEDEFAULT, CW_USEDEFAULT, 
-		CW_USEDEFAULT, CW_USEDEFAULT, 
+		CW_USEDEFAULT, CW_USEDEFAULT,
+		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, NULL, NULL, 0);
 
-	copy_button = CreateWindowEx(0, TEXT("BUTTON"),
-		BTN_LBL_COPY,
+	copy_button = CreateWindowEx(0, WC_BUTTON, BTN_LBL_COPY,
 		WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_DISABLED,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceClipboardButton),
 		HINSTANCE(SP_InstanceClipboardButton), 0);
 
-	highlight_button = CreateWindowEx(0, TEXT("BUTTON"),
-		BTN_LBL_HIGHLIGHT,
+	highlight_button = CreateWindowEx(0, WC_BUTTON, BTN_LBL_HIGHLIGHT,
 		WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_DISABLED,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceHighlightButton),
 		HINSTANCE(SP_InstanceHighlightButton), 0);
-	
-	update_button = CreateWindowEx(0, TEXT("BUTTON"),
-		BTN_LBL_UPDATE,
+
+	update_button = CreateWindowEx(0, WC_BUTTON, BTN_LBL_UPDATE,
 		WS_CHILD | WS_TABSTOP,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceUpdateButton),
 		HINSTANCE(SP_InstanceUpdateButton), 0);
 
-	cancel_button = CreateWindowEx(0, TEXT("BUTTON"),
-		BTN_LBL_CANCEL,
+	cancel_button = CreateWindowEx(0, WC_BUTTON, BTN_LBL_CANCEL,
 		WS_CHILD | WS_TABSTOP,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceCancelButton),
 		HINSTANCE(SP_InstanceCancelButton), 0);
 
-	case_sensitivity_checkbox = ::CreateWindowEx(0,
-		TEXT("BUTTON"), CHK_BOX_LABEL_CASE,
-		WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX, 
+	case_sensitivity_checkbox = ::CreateWindowEx(0, WC_BUTTON, CHK_BOX_LABEL_CASE,
+		WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX,
 		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceCaseSensitivityCB),
 		HINSTANCE(SP_InstanceCaseSensitivityCB), 0);
 
-	whole_word_checkbox = ::CreateWindowEx(0,
-		TEXT("BUTTON"), CHK_BOX_LABEL_WORD,
-		WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX, 
+	whole_word_checkbox = ::CreateWindowEx(0, WC_BUTTON, CHK_BOX_LABEL_WORD,
+		WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX,
 		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceMatchWordCB),
 		HINSTANCE(SP_InstanceMatchWordCB), 0);
 
-	plaintext_checkbox = ::CreateWindowEx(0,
-		TEXT("BUTTON"), CHK_BOX_LABEL_REGEX,
-		WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX, 
+	plaintext_checkbox = ::CreateWindowEx(0, WC_BUTTON, CHK_BOX_LABEL_REGEX,
+		WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX,
 		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
 		parent, HMENU(SP_InstanceRegexCB),
 		HINSTANCE(SP_InstanceRegexCB), 0);
@@ -693,10 +450,6 @@ void SearchPlusUI::create_controls(HWND parent)
 	regex_cb_tooltip = assign_tooltip(plaintext_checkbox, parent, TEXT("Treat keyword as plain text (escapes regex special chars)"));
 	keyword_tooltip = assign_tooltip(keyword_listbox, parent, TEXT("Click to view flags. Double click to edit."));
 
-	font = CreateFont(14, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS,
-		TEXT("Verdana"));
-	
 	if(font){
 		SendMessage(add_button, WM_SETFONT, WPARAM(font), 0);
 		SendMessage(search_button, WM_SETFONT, WPARAM(font), 0);
@@ -728,11 +481,10 @@ void SearchPlusUI::close_window()
 	SetWindowLongPtr(add_button, GWLP_WNDPROC, (LONG_PTR)add_proc);
 
 	CloseWindow(main_window);
-	DeleteObject(font);
 	close_flag = true;
 }
 
-bool SearchPlusUI::create_window()
+bool SearchPlusUI::create_sp_window()
 {
 	RECT rect = {0, 0, 0, 0};
 	HWND desktop;
@@ -745,19 +497,18 @@ bool SearchPlusUI::create_window()
 
 	GetClientRect(desktop, &rect);
 
-	x = (rect.right - SP_PANEL_WIDTH) / 2;
+	x = (rect.right - SP_UIPANEL_MIN_W) / 2;
 	y = (rect.bottom - SP_WINDOW_HEIGHT) / 2;
-
 
 
 	main_window = ::CreateWindowEx(
 		WS_EX_TOOLWINDOW | WS_EX_LAYERED,
-		className,
+		sp_wnd_classname,
 		TEXT("Search+"),
 		WS_SYSMENU | WS_SIZEBOX | WS_TABSTOP | WS_GROUP | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
-		x, y, SP_PANEL_WIDTH, SP_WINDOW_HEIGHT,
+		x, y, SP_UIPANEL_MIN_W, SP_WINDOW_HEIGHT,
 		this->editor_handle, NULL,
-		(HINSTANCE)SP_InstanceWndClass,
+		(HINSTANCE)SP_InstanceSPWndClass,
 		0);
 
 	init_flag = true;
@@ -771,10 +522,6 @@ void SearchPlusUI::handle_window_close()
 {
 	init_flag = false;
 	DestroyWindow(main_window);
-
-	if(font)
-		DeleteObject(font);
-
 	Ed_SetFocusOnEditor();
 }
 
@@ -783,77 +530,72 @@ void SearchPlusUI::resize_controls()
 	RECT parent_rect;
 	int ui_panel_width, width, height;
 
-	/* 
-	Mid point between input list and input field 
+	/*
+	Mid point between input list and input field
 	The buttons are aligned based on this point.
 	*/
-	int x_offset; 
+	int x_offset;
 
 	::GetClientRect(main_window, &parent_rect);
 
 	width = parent_rect.right - parent_rect.left;
 	height = parent_rect.bottom - parent_rect.top;
 
-	ui_panel_width = SP_PANEL_WIDTH;
+	ui_panel_width = SP_UIPANEL_MIN_W;
 
-	x_offset = SP_UIPANEL_MARGIN_H + PATTERN_LISTBOX_WIDTH + SP_PADDING_HORI;
+	x_offset = SP_UIPANEL_MARGIN_H + KW_INPUT_W + SP_PADDING_H;
 
-	if(width > SP_PANEL_WIDTH){
-		x_offset += (width - SP_PANEL_WIDTH) / 2;
+	if(width > SP_UIPANEL_MIN_W){
+		x_offset += (width - SP_UIPANEL_MIN_W) / 2;
 	}
 
-	MoveWindow(output_area, 
-		SP_TA_X, SP_TA_Y, 
-		parent_rect.right,
-		parent_rect.bottom - SP_TA_Y, true);
+	MoveWindow(output_area, OUTPUT_LIST_X, OUTPUT_LIST_Y,
+		parent_rect.right, parent_rect.bottom - OUTPUT_LIST_Y, true);
 
-	MoveWindow(input_field, x_offset - PATTERN_LISTBOX_WIDTH - SP_PADDING_HORI, 
-		SP_INPUT_Y, PATTERN_LISTBOX_WIDTH, 
-		SP_ROW_HEIGHT, true);
+	MoveWindow(input_field, KW_INPUT_X(x_offset), KW_INPUT_Y,
+		KW_INPUT_W, KW_INPUT_H, true);
 
-	MoveWindow(search_button, x_offset - SP_PADDING_HORI - SP_BTN_WIDTH,
-		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(search_button, BTN_SEARCH_X(x_offset), BTN_SEARCH_Y,
+		BTN_SEARCH_W, BTN_SEARCH_H, true);
 
-	MoveWindow(add_button, x_offset - 2 * (SP_PADDING_HORI + SP_BTN_WIDTH),
-		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(add_button, BTN_ADD_X(x_offset), BTN_ADD_Y,
+		BTN_ADD_W, BTN_ADD_H, true);
 
-	MoveWindow(remove_button, x_offset - 3 * (SP_PADDING_HORI + SP_BTN_WIDTH),
-		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(remove_button, BTN_REMOVE_X(x_offset), BTN_REMOVE_Y,
+		BTN_REMOVE_W, BTN_REMOVE_H, true);
 
-	MoveWindow(reset_button, x_offset - 4 * (SP_PADDING_HORI + SP_BTN_WIDTH),
-		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(reset_button, BTN_RESET_X(x_offset), BTN_RESET_Y,
+		BTN_RESET_W, BTN_RESET_H, true);
 
-	MoveWindow(update_button, x_offset - SP_PADDING_HORI - SP_BTN_WIDTH,
-		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(update_button, BTN_UPDATE_X(x_offset), BTN_UPDATE_Y,
+		BTN_UPDATE_W, BTN_UPDATE_H, true);
 
-	MoveWindow(cancel_button, x_offset - 2 * (SP_PADDING_HORI + SP_BTN_WIDTH),
-		SP_BTN_Y, SP_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(cancel_button, BTN_CANCEL_X(x_offset), BTN_CANCEL_Y,
+		BTN_CANCEL_W, BTN_CANCEL_H, true);
 
-	MoveWindow(keyword_listbox, x_offset + SP_PADDING_HORI, 
-		SP_Y_OFFSET, PATTERN_LISTBOX_WIDTH,
-		SP_LIST_HEIGHT, true);
+	MoveWindow(copy_button, BTN_COPY_X(x_offset), BTN_COPY_Y,
+		BTN_COPY_W, BTN_COPY_H, true);
 
-	MoveWindow(list_label, x_offset - SP_LISTLABEL_WIDTH, 
-		SP_Y_OFFSET, SP_LISTLABEL_WIDTH, SP_LBL_HEIGHT, true);
+	MoveWindow(highlight_button, BTN_HIGHLIGHT_X(x_offset), BTN_HIGHLIGHT_Y,
+		BTN_HIGHLIGHT_W, BTN_HIGHLIGHT_H, true);
 
-	MoveWindow(result_label, SP_MARGIN_HORIZONTAL, SP_TA_Y - SP_LBL_HEIGHT, 
-		SP_RESLABEL_WIDTH, SP_LBL_HEIGHT, true);
+	MoveWindow(keyword_listbox, KW_LISTBOX_X(x_offset), KW_LISTBOX_Y,
+		KW_LISTBOX_W, KW_LISTBOX_H, true);
 
-	MoveWindow(copy_button, x_offset - SP_PADDING_HORI - SP_COPY_BTN_WIDTH,
-		SP_BTN_Y + SP_Y_OFFSET + SP_ROW_HEIGHT, SP_COPY_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(list_label, KW_LABEL_X(x_offset), KW_LABEL_Y,
+		KW_LABEL_W, KW_LABEL_H, true);
 
-	MoveWindow(highlight_button, x_offset - 2 * SP_PADDING_HORI - SP_COPY_BTN_WIDTH - HIGHLIGHT_BTN_WIDTH,
-		SP_BTN_Y + SP_Y_OFFSET + SP_ROW_HEIGHT, 
-		HIGHLIGHT_BTN_WIDTH, SP_ROW_HEIGHT, true);
+	MoveWindow(result_label, RESULT_LABEL_X, RESULT_LABEL_Y,
+		RESULT_LABEL_W, RESULT_LABEL_H, true);
 
-	MoveWindow(case_sensitivity_checkbox, x_offset + 2 * SP_PADDING_HORI + PATTERN_LISTBOX_WIDTH, 
-		SP_Y_OFFSET, SP_CHECKBOX_WIDTH, SP_CHECKBOX_HEIGHT, true);
+	MoveWindow(case_sensitivity_checkbox, CHKBOX_CASE_X(x_offset),
+		CHKBOX_CASE_Y, CHKBOX_CASE_W, CHKBOX_CASE_H, true);
 
-	MoveWindow(whole_word_checkbox, x_offset + 2 * SP_PADDING_HORI + PATTERN_LISTBOX_WIDTH, 
-		SP_Y_OFFSET + SP_CHECKBOX_HEIGHT, SP_CHECKBOX_WIDTH, SP_CHECKBOX_HEIGHT, true);
+	MoveWindow(whole_word_checkbox, CHKBOX_WHOLEWORD_X(x_offset),
+		CHKBOX_WHOLEWORD_Y, CHKBOX_WHOLEWORD_W, CHKBOX_WHOLEWORD_H, true);
 
-	MoveWindow(plaintext_checkbox, x_offset + 2 * SP_PADDING_HORI + PATTERN_LISTBOX_WIDTH, 
-		SP_Y_OFFSET + 2 * SP_CHECKBOX_HEIGHT, SP_CHECKBOX_WIDTH, SP_CHECKBOX_HEIGHT, true);
+	MoveWindow(plaintext_checkbox, CHKBOX_REGEX_X(x_offset),
+		CHKBOX_REGEX_Y, CHKBOX_REGEX_W, CHKBOX_REGEX_H, true);
 
 	InvalidateRect(main_window, NULL, true);
 }
@@ -861,11 +603,11 @@ void SearchPlusUI::resize_controls()
 void SearchPlusUI::handle_window_create(HWND hwnd)
 {
 	create_controls(hwnd);
-	/* 
+	/*
 	Update the window procedures of the controls to be included in tab navigation here
 	Keep the original and call it from the custom procedure
 	The procedures for similar controls can be different (not all buttons have same proc)
-	for ex, a button with a tooltip has a different procedure than the normal button	
+	for ex, a button with a tooltip has a different procedure than the normal button
 	*/
 	edit_proc = (WNDPROC)SetWindowLongPtr(input_field, GWLP_WNDPROC, (LONG_PTR)TabbedControlProc);
 	search_btn_proc = (WNDPROC)SetWindowLongPtr(search_button, GWLP_WNDPROC, (LONG_PTR)TabbedControlProc);
@@ -905,7 +647,7 @@ void SearchPlusUI::handle_add_button()
 			return;
 		}
 
-		keyword_t *ui_kw = new keyword_t(keyword);
+		UI_Keyword *ui_kw = new UI_Keyword(keyword);
 		index = SendMessage(keyword_listbox, LB_ADDSTRING, 0, LPARAM(ui_kw));
 	}
 
@@ -931,6 +673,7 @@ void SearchPlusUI::handle_remove_button()
 void SearchPlusUI::handle_reset_button()
 {
 	PAT_DeleteAll();
+	output_width = 0;
 	SendMessage(keyword_listbox, LB_RESETCONTENT, 0, 0);
 	SendMessage(output_area, LB_RESETCONTENT, 0, 0);
 	SendMessage(result_label, WM_SETTEXT, 0, (LPARAM)EMPTY_STRING);
@@ -941,7 +684,7 @@ void SearchPlusUI::handle_reset_button()
 void SearchPlusUI::handle_copy_button()
 {
 	int count = 0;
-	matched_line_t *item;
+	MatchedLine *item;
 	TCHAR * clipboard_string = NULL;
 	int clipboard_len,  ret;
 	HGLOBAL hgl;
@@ -964,14 +707,14 @@ void SearchPlusUI::handle_copy_button()
 
 	for(int index = 0; index < count; index++){
 
-		item = (matched_line_t *)SendMessage(output_area, LB_GETITEMDATA, index, 0);
-#ifdef COPY_STRINGS_THE_STUPID_WAY
-		--> This was a nice ego unbooster. //break the build if stupid macro is enabled.
-		wcscat_s(clipboard_string, clipboard_len, item->text);
-#else
+		item = (MatchedLine *)SendMessage(output_area, LB_GETITEMDATA, index, 0);
+
+		if(!item->text){
+			item->FetchLine();
+		}
+
 		memcpy(buf_pos, item->text, sizeof(TCHAR) * item->line_length);
 		buf_pos += item->line_length;
-#endif
 	}
 
 	*buf_pos = 0;
@@ -984,8 +727,8 @@ void SearchPlusUI::handle_copy_button()
 
 void SearchPlusUI::handle_highlight_button()
 {
-	matched_line_t *lbitem = NULL;
-	matched_segment_t *segment;
+	MatchedLine *lbitem = NULL;
+	MatchedSegment *segment;
 	int match_count = 0;
 
 	ShowWindow(main_window, SW_HIDE);
@@ -1012,16 +755,30 @@ void SearchPlusUI::handle_highlight_button()
 
 }
 
+void SearchPlusUI::stop_search()
+{
+	if(mode != UI_MODE_SEARCH){
+		return;
+	}
+
+	Ed_StopSearch();
+}
+
 void SearchPlusUI::handle_search_button()
 {
 	TCHAR temp[NUM_LENGTH] = {0};
 	int result;
 
-	if(mode != UI_MODE_NORMAL){
+	if(mode == UI_MODE_SEARCH){
+
+		/* search button moonlights as stop button when search is in progress */
+		stop_search();
 		return;
 	}
 
-	mode = UI_MODE_SEARCH;
+	if(mode != UI_MODE_NORMAL){
+		return;
+	}
 
 	linecount = Ed_GetLineCount();
 
@@ -1044,7 +801,9 @@ void SearchPlusUI::handle_search_button()
 		EnableWindow(reset_button, false);
 		EnableWindow(add_button, false);
 		EnableWindow(remove_button, false);
-		EnableWindow(search_button, false);
+		SendMessage(search_button, WM_SETTEXT, 0, (LPARAM)BTN_LBL_STOP);
+		output_width = 0;
+		mode = UI_MODE_SEARCH;
 	}
 	else{
 		SendMessage(result_label, WM_SETTEXT, 0, (LPARAM)EMPTY_STRING);
@@ -1070,18 +829,18 @@ void SearchPlusUI::handle_escape_key()
 void SearchPlusUI::load_keywords(SearchPattern *pat_list)
 {
 	SearchPattern *temp_pat = pat_list;
-	keyword_t *ui_kw = NULL;
+	UI_Keyword *ui_kw = NULL;
 
 	while(temp_pat){
-		ui_kw = new keyword_t(temp_pat);
+		ui_kw = new UI_Keyword(temp_pat);
 		::SendMessage(keyword_listbox, LB_ADDSTRING, 0, LPARAM(ui_kw));
-		temp_pat = temp_pat->next;
+		temp_pat = temp_pat->GetNext();
 	}
 }
 
 void SearchPlusUI::draw_keyword(LPDRAWITEMSTRUCT pDis)
 {
-	keyword_t *uipat = (keyword_t*)(pDis->itemData);
+	UI_Keyword *uipat = (UI_Keyword*)(pDis->itemData);
 	TCHAR temp[SP_MAX_PATTERN_LENGTH + NUM_LENGTH] = {0};
 	RECT text_rect = pDis->rcItem;
 	int length;
@@ -1125,10 +884,10 @@ void SearchPlusUI::draw_matched_string(LPDRAWITEMSTRUCT pDis)
 {
 	TCHAR num_w[NUM_LENGTH] = {0};
 	TCHAR temp[NUM_LENGTH] = {0};
-	matched_line_t *lbitem = (matched_line_t*)(pDis->itemData);
+	MatchedLine *lbitem = (MatchedLine*)(pDis->itemData);
 	RECT text_rect = pDis->rcItem;
 	int i = 0, j = 0;
-	matched_segment_t *matchlist = NULL;
+	MatchedSegment *matchlist = NULL;
 
 	if(!lbitem){
 		return;
@@ -1160,14 +919,22 @@ void SearchPlusUI::draw_matched_string(LPDRAWITEMSTRUCT pDis)
 
 	draw_text(pDis->hDC, num_w, linecount_strlen + 3, &text_rect, COLOR_LINE_NUM);
 
-	lbitem->draw_item(pDis->hDC, &text_rect);
+	lbitem->Draw(pDis->hDC, &text_rect);
+
+	DrawText(pDis->hDC, lbitem->text, lbitem->line_length, &text_rect, DT_FLAGS | DT_CALCRECT);
+
+	if(output_width < text_rect.right){
+
+		output_width = text_rect.right;
+		SendMessage(output_area, LB_SETHORIZONTALEXTENT, output_width, 0);
+	}
 }
 
 void SearchPlusUI::goto_selected_line()
 {
-	matched_line_t *lbitem = NULL;
+	MatchedLine *lbitem = NULL;
 	int index;
-	
+
 	index = SendMessage(output_area, LB_GETCURSEL, 0, 0);
 	SendMessage(output_area, LB_GETTEXT, index, WPARAM(&lbitem));
 
@@ -1223,7 +990,7 @@ int SearchPlusUI::handle_keys_tabbed_control(HWND hwnd, WPARAM wParam, LPARAM lP
 		}
 	}
 	else if(wParam == VK_TAB){
-		
+
 		for(index = 0; (index < TAB_CTRL_COUNT) && (windows[index] != hwnd); index++);
 
 		if(index < TAB_CTRL_COUNT){
@@ -1254,10 +1021,10 @@ void SearchPlusUI::handle_window_activate(bool focus)
 	}
 }
 
-keyword_t *SearchPlusUI::get_selected_keyword()
+UI_Keyword *SearchPlusUI::get_selected_keyword()
 {
 	int index = LB_ERR;
-	keyword_t *kw = NULL;
+	UI_Keyword *kw = NULL;
 
 	index = SendMessage(keyword_listbox, LB_GETCURSEL, 0, 0);
 
@@ -1272,7 +1039,7 @@ keyword_t *SearchPlusUI::get_selected_keyword()
 
 void SearchPlusUI::start_keyword_edit()
 {
-	keyword_t *kw = NULL;
+	UI_Keyword *kw = NULL;
 
 	if(mode != UI_MODE_NORMAL){
 		return;
@@ -1296,7 +1063,7 @@ void SearchPlusUI::start_keyword_edit()
 	ShowWindow(add_button, SW_HIDE);
 	ShowWindow(remove_button, SW_HIDE);
 	ShowWindow(search_button, SW_HIDE);
-	
+
 	ShowWindow(update_button, SW_SHOW);
 	ShowWindow(cancel_button, SW_SHOW);
 
@@ -1310,7 +1077,7 @@ void SearchPlusUI::reset_highlights()
 	SendMessage(plaintext_checkbox, BM_SETCHECK, BST_UNCHECKED, 0);
 }
 
-void SearchPlusUI::highlight_keyword(keyword_t *kw)
+void SearchPlusUI::highlight_keyword(UI_Keyword *kw)
 {
 	int check_status;
 
@@ -1367,7 +1134,7 @@ void SearchPlusUI::handle_update_button()
 			return;
 		}
 
-		keyword_t *ui_kw = (keyword_t*)SendMessage(keyword_listbox, LB_GETITEMDATA, index, 0);
+		UI_Keyword *ui_kw = (UI_Keyword*)SendMessage(keyword_listbox, LB_GETITEMDATA, index, 0);
 
 		if(ui_kw){
 			ui_kw->update(keyword);
@@ -1390,7 +1157,7 @@ void SearchPlusUI::exit_edit()
 	ShowWindow(add_button, SW_SHOW);
 	ShowWindow(remove_button, SW_SHOW);
 	ShowWindow(search_button, SW_SHOW);
-	
+
 	ShowWindow(update_button, SW_HIDE);
 	ShowWindow(cancel_button, SW_HIDE);
 
@@ -1405,7 +1172,7 @@ void SearchPlusUI::exit_edit()
 
 void SearchPlusUI::handle_keyword_selection()
 {
-	keyword_t *kw = NULL;
+	UI_Keyword *kw = NULL;
 
 	if((kw = get_selected_keyword()) == NULL){
 		return;
@@ -1436,8 +1203,8 @@ bool SearchPlusUI::get_minmax_size(MINMAXINFO *minmax)
 	if(!minmax)
 		return false;
 
-	if(minmax->ptMinTrackSize.x < SP_PANEL_WIDTH){
-		minmax->ptMinTrackSize.x = SP_PANEL_WIDTH;
+	if(minmax->ptMinTrackSize.x < SP_UIPANEL_MIN_W){
+		minmax->ptMinTrackSize.x = SP_UIPANEL_MIN_W;
 		minmax->ptMinTrackSize.y = (minmax->ptMaxSize.y * 50) / 100;
 		return true;
 	}
@@ -1445,7 +1212,7 @@ bool SearchPlusUI::get_minmax_size(MINMAXINFO *minmax)
 	return false;
 }
 
-LRESULT CALLBACK TabbedControlProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam) 
+LRESULT CALLBACK TabbedControlProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam)
 {
 	WNDPROC proc = ui_data->get_wnd_proc(hWnd);
 	LRESULT retval = 1;
@@ -1461,7 +1228,7 @@ LRESULT CALLBACK TabbedControlProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPAR
 	return retval;
 }
 
-LRESULT CALLBACK WndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam) 
+LRESULT CALLBACK WndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam)
 {
 	if(!ui_data){
 		return DefWindowProc(hWnd, iMessage, wParam, lParam);
@@ -1566,11 +1333,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam)
 
 	case WM_DELETEITEM:
 		if(wParam == SP_InstanceOutputArea){
-			matched_line_t *item = (matched_line_t *)(((DELETEITEMSTRUCT *)lParam)->itemData);
+			MatchedLine *item = (MatchedLine *)(((DELETEITEMSTRUCT *)lParam)->itemData);
 			delete item;
 		}
 		else if(wParam == SP_InstancePatternList){
-			keyword_t *uipat = (keyword_t*)(((DELETEITEMSTRUCT *)lParam)->itemData);
+			UI_Keyword *uipat = (UI_Keyword*)(((DELETEITEMSTRUCT *)lParam)->itemData);
 			delete uipat;
 		}
 		break;
@@ -1596,6 +1363,7 @@ void UI_Terminate()
 void UI_Initialize(HWND parent_handle)
 {
 	WNDCLASS wndclass;
+	WNDCLASS abtclass;
 
 	ui_data = new SearchPlusUI(parent_handle);
 
@@ -1603,26 +1371,47 @@ void UI_Initialize(HWND parent_handle)
 	wndclass.lpfnWndProc = WndProc;
 	wndclass.cbClsExtra = 0;
 	wndclass.cbWndExtra = 0;
-	wndclass.hInstance = HINSTANCE(SP_InstanceWndClass);
+	wndclass.hInstance = HINSTANCE(SP_InstanceSPWndClass);
 	wndclass.hIcon = 0;
 	wndclass.hCursor = NULL;
 	wndclass.hbrBackground = (HBRUSH) GetStockObject(WHITE_BRUSH);
 	wndclass.lpszMenuName = NULL;
-	wndclass.lpszClassName = className;
+	wndclass.lpszClassName = sp_wnd_classname;
 
 	if (!::RegisterClass(&wndclass)){
 		::MessageBox(NULL, TEXT("register class failed"), TEXT("Err: Search+ plugin"), MB_OK);
 	}
+
+	abtclass.style = CS_HREDRAW | CS_VREDRAW;
+	abtclass.lpfnWndProc = AboutWndProc;
+	abtclass.cbClsExtra = 0;
+	abtclass.cbWndExtra = 0;
+	abtclass.hInstance = HINSTANCE(SP_InstanceAboutWindowClass);
+	abtclass.hIcon = 0;
+	abtclass.hCursor = NULL;
+	abtclass.hbrBackground = (HBRUSH) GetStockObject(WHITE_BRUSH);
+	abtclass.lpszMenuName = NULL;
+	abtclass.lpszClassName = about_wnd_classname;
+
+	if (!::RegisterClass(&abtclass)){
+		::MessageBox(NULL, TEXT("about wnd register class failed"), TEXT("Err: Search+ plugin"), MB_OK);
+	}
+
 }
 
 void UI_ShowSettingsWindow()
 {
-	ui_data->launch();
+	ui_data->LaunchSearchPlusWindow();
 }
 
-void UI_HandleMatchingLine(int line_number, int line_length, CHAR *text, SearchPattern *pat, int match_start, int match_length)
+void UI_ShowAboutWindow()
 {
-	ui_data->handle_matching_line(line_number, line_length, text, pat, match_start, match_length);
+	ui_data->LaunchAboutWindow();
+}
+
+void UI_HandleMatchingLine(int line_number, int line_length, SearchPattern *pat, int match_start, int match_length)
+{
+	ui_data->handle_matching_line(line_number, line_length, pat, match_start, match_length);
 }
 
 void UI_UpdateResultCount(int count)
@@ -1632,9 +1421,10 @@ void UI_UpdateResultCount(int count)
 
 void SearchPlusUI::handle_search_complete(int count, SearchPattern *patlist)
 {
-	TCHAR text[RESULT_LBL_TEXT_LENGTH] = {0};
+	TCHAR text[RESULT_LABEL_TEXT_LENGTH] = {0};
 	int matched_line_count, pos;
-	keyword_t *uipat;
+	UI_Keyword *uipat;
+	MatchedLine *line = NULL;
 
 	matched_line_count = SendMessage(output_area, LB_GETCOUNT, 0, 0);
 
@@ -1646,7 +1436,7 @@ void SearchPlusUI::handle_search_complete(int count, SearchPattern *patlist)
 
 	while(patlist){
 
-		uipat = (keyword_t*)SendMessage(keyword_listbox, LB_GETITEMDATA, pos, 0);
+		uipat = (UI_Keyword*)SendMessage(keyword_listbox, LB_GETITEMDATA, pos, 0);
 
 		if(uipat){
 			uipat->count = patlist->count;
@@ -1654,18 +1444,26 @@ void SearchPlusUI::handle_search_complete(int count, SearchPattern *patlist)
 		}
 
 		pos++;
-		patlist = patlist->next;
+		patlist = patlist->GetNext();
 	}
-	
+
+	for(int loop = 0; loop < matched_line_count; loop++){
+
+		line = (MatchedLine*)SendMessage(output_area, LB_GETITEMDATA, loop, 0);
+
+		line->FetchLine();
+	}
+
 	InvalidateRect(keyword_listbox, NULL, true);
 	UpdateWindow(keyword_listbox);
 
 	EnableWindow(reset_button, true);
 	EnableWindow(add_button, true);
 	EnableWindow(remove_button, true);
-	EnableWindow(search_button, true);
 	EnableWindow(copy_button, true);
 	EnableWindow(highlight_button, true);
+
+	SendMessage(search_button, WM_SETTEXT, 0, (LPARAM)BTN_LBL_SEARCH);
 
 	mode = UI_MODE_NORMAL;
 }
@@ -1674,3 +1472,111 @@ void UI_HandleSearchComplete(int count, SearchPattern *patlist)
 {
 	ui_data->handle_search_complete(count, patlist);
 }
+
+int SearchPlusUI::LaunchAboutWindow()
+{
+	create_about_window();
+	return 0;
+}
+
+LRESULT CALLBACK AboutWndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam)
+{
+	if(!ui_data){
+		return DefWindowProc(hWnd, iMessage, wParam, lParam);
+	}
+
+	switch (iMessage) {
+
+	case WM_NOTIFY:
+		if(LOWORD(wParam) == SP_InstanceUpdateLink)	{
+
+			PNMLINK nlink = (PNMLINK)lParam;
+
+			switch(nlink->hdr.code){
+
+			case NM_CLICK:
+				ShellExecute(NULL, TEXT("open"), nlink->item.szUrl, NULL, NULL, SW_SHOWDEFAULT);
+				break;
+			}
+		}
+	break;
+
+	case WM_KEYDOWN:
+		if(wParam == VK_ESCAPE){
+			CloseWindow(ui_data->about_window);
+			DestroyWindow(ui_data->about_window);
+			ui_data->about_window = NULL;
+		}
+		break;
+
+	case WM_CREATE:
+		break;
+
+	case WM_CLOSE:
+		ui_data->about_window = NULL;
+		break;
+	}
+
+	return DefWindowProc(hWnd, iMessage, wParam, lParam);
+}
+
+bool SearchPlusUI::create_about_window()
+{
+	RECT rect = {0, 0, 0, 0};
+	RECT clientrect = {0, 0, 0, 0};
+	HWND desktop;
+	int x, y, link_height = 0;
+	HDC linkhdc;
+	SIZE size = {0, 0};
+
+	if(about_window)
+		return false;
+
+	desktop = GetDesktopWindow();
+
+	GetClientRect(desktop, &rect);
+
+	x = (rect.right - ABOUT_WND_WIDTH) / 2;
+	y = (rect.bottom - ABOUT_WND_HEIGHT) / 2;
+
+	about_window = ::CreateWindowEx(
+		WS_EX_TOOLWINDOW,
+		about_wnd_classname,
+		TEXT("About Search+"),
+		WS_SYSMENU | WS_SIZEBOX | WS_TABSTOP | WS_GROUP | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
+		x, y, ABOUT_WND_WIDTH, ABOUT_WND_HEIGHT,
+		this->editor_handle, NULL,
+		(HINSTANCE)SP_InstanceAboutWindowClass,
+		0);
+
+	update_link = CreateWindowEx(0,
+		WC_LINK,
+		SP_VERSION_STR TEXT("\n\n")
+			TEXT("© <a href=\"http://amarghosh.blogspot.com/2012/08/searchplus.html\">amarghosh</a>\n\n")
+			TEXT("Check for the <a href=\"http://code.google.com/p/searchplus/downloads/list\">")
+			TEXT("latest version</a>"),
+		WS_VISIBLE | WS_CHILD | WS_TABSTOP | SS_NOTIFY,
+		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+		this->about_window, (HMENU)SP_InstanceUpdateLink,
+		(HINSTANCE)SP_InstanceUpdateLink,
+		0);
+
+	SendMessage(update_link, WM_SETFONT, WPARAM(font), 0);
+
+	GetClientRect(about_window, &clientrect);
+
+	linkhdc = GetWindowDC(update_link);
+
+	x = (ABOUT_WND_WIDTH - ABT_LINK_WIDTH) / 2;
+	y = ABT_WND_VERT_PADDING;
+	link_height = SendMessage(update_link, LM_GETIDEALSIZE, ABT_LINK_WIDTH, LPARAM(&size));
+
+	MoveWindow(update_link, x, y, ABT_LINK_WIDTH, link_height, false);
+
+	ShowWindow(about_window, SW_SHOW);
+	SetFocus(about_window);
+
+	return true;
+}
+
+
